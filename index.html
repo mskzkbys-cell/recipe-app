@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マイレシピ帳</title>
+<!-- PWA設定：ホーム画面に追加したときアプリのように動く -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#e8734a">
+<!-- iPhone(Safari)用の設定 -->
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="レシピ帳">
+<style>
+  /* ===== 全体の基本設定 ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    background: #faf6f0;
+    color: #3a3a3a;
+    line-height: 1.6;
+  }
+
+  /* ===== ヘッダー ===== */
+  header {
+    background: #e8734a;
+    color: white;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 1.2rem; }
+  #addBtn {
+    background: white;
+    color: #e8734a;
+    border: none;
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 0.95rem;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  /* ===== 検索・絞り込み ===== */
+  .toolbar {
+    padding: 12px 16px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  /* トップページのクイック追加ボタン */
+  .quickAdd {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .quickAdd button {
+    flex: 1;
+    background: white;
+    border: 1px solid #e8a887;
+    color: #d05a30;
+    border-radius: 10px;
+    padding: 10px 4px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .quickAdd button:active { background: #fdeee7; }
+
+  #searchBox {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1rem;
+  }
+  .tagFilter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .tagFilter button {
+    background: white;
+    border: 1px solid #e8734a;
+    color: #e8734a;
+    border-radius: 16px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .tagFilter button.active {
+    background: #e8734a;
+    color: white;
+  }
+
+  /* ===== レシピ一覧 ===== */
+  #recipeList {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 8px 16px 80px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  .card:active { transform: scale(0.97); }
+  .card img, .card .noimg {
+    width: 100%;
+    height: 110px;
+    object-fit: cover;
+    display: block;
+  }
+  .card .noimg {
+    background: #f0e6da;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+  }
+  .card .info { padding: 8px 10px 10px; }
+  .card .name {
+    font-weight: bold;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card .tags {
+    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .tagChip {
+    background: #fdeee7;
+    color: #d05a30;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 0.7rem;
+  }
+  #emptyMsg {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: #999;
+    padding: 40px 0;
+  }
+
+  /* ===== モーダル（詳細・編集画面） ===== */
+  .modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 20;
+    overflow-y: auto;
+    padding: 20px 12px;
+  }
+  .modal.open { display: block; }
+  .modalBox {
+    background: white;
+    border-radius: 12px;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .modalBox h2 { font-size: 1.15rem; margin-bottom: 12px; color: #d05a30; }
+
+  /* 取り込み結果のお知らせ（フォーム上部） */
+  #editNotice {
+    background: #eef7ee;
+    color: #2e7d32;
+    font-size: 0.85rem;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+  }
+
+  /* 編集フォーム */
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: bold;
+    margin-bottom: 4px;
+    color: #666;
+  }
+  .field input[type="text"], .field input[type="url"], .field textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+  }
+  .field textarea { min-height: 90px; resize: vertical; }
+  #photoPreview {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 8px;
+    margin-top: 8px;
+    display: none;
+  }
+
+  /* URL取り込みボックス */
+  .importBox {
+    background: #fdf3ec;
+    border: 1px dashed #e8a887;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+  }
+  .importBox label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: #666;
+    margin-bottom: 4px;
+  }
+  .importRow { display: flex; gap: 8px; }
+  .importRow input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1rem;
+  }
+  .importRow button { white-space: nowrap; }
+  #importStatus { font-size: 0.8rem; margin-top: 6px; color: #888; }
+  #importStatus.error { color: #c0392b; }
+  .linkBtn {
+    background: none;
+    border: none;
+    color: #d05a30;
+    text-decoration: underline;
+    font-size: 0.8rem;
+    margin-top: 8px;
+    padding: 0;
+    cursor: pointer;
+  }
+  #pasteArea textarea {
+    width: 100%;
+    min-height: 110px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+  }
+  #pasteArea .btn { margin-top: 8px; }
+
+  /* ボタン類 */
+  .btnRow {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .btnPrimary { background: #e8734a; color: white; }
+  .btnGray { background: #eee; color: #555; }
+  .btnDanger { background: #fff; color: #c0392b; border: 1px solid #c0392b; margin-left: auto; }
+
+  /* 詳細表示 */
+  #detailPhoto {
+    width: 100%;
+    max-height: 260px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .detailSection { margin-bottom: 14px; }
+  .detailSection h3 {
+    font-size: 0.85rem;
+    color: #d05a30;
+    border-bottom: 2px solid #fdeee7;
+    padding-bottom: 2px;
+    margin-bottom: 6px;
+  }
+  .detailSection p { white-space: pre-wrap; font-size: 0.95rem; }
+  .detailSection a { color: #2980b9; word-break: break-all; }
+
+  /* 栄養表示 */
+  .nutKcal { font-size: 1.2rem; font-weight: bold; color: #d05a30; }
+  .pfcBar {
+    display: flex;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    background: #eee;
+    margin: 8px 0 6px;
+  }
+  .pfcBar .p { background: #5b9bd5; }
+  .pfcBar .f { background: #f2b04c; }
+  .pfcBar .c { background: #e8734a; }
+  .pfcLegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.8rem; }
+  .pfcLegend .dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    margin-right: 4px;
+  }
+  .nutNote { font-size: 0.75rem; color: #999; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🍳 マイレシピ帳</h1>
+  <button id="addBtn">＋ 追加</button>
+</header>
+
+<div class="toolbar">
+  <div class="quickAdd">
+    <button data-mode="url">🔗 URLから<br>取り込み</button>
+    <button data-mode="paste">📋 SNS投稿文を<br>貼り付け</button>
+    <button data-mode="photo">📷 写真から<br>読み取り</button>
+  </div>
+  <input type="text" id="searchBox" placeholder="レシピ名・材料で検索…">
+  <div class="tagFilter" id="tagFilter"></div>
+</div>
+
+<div id="recipeList"></div>
+
+<!-- ===== 編集モーダル ===== -->
+<div class="modal" id="editModal">
+  <div class="modalBox">
+    <h2 id="editTitle">レシピを追加</h2>
+    <div id="editNotice" style="display:none;"></div>
+    <div class="field">
+      <label>料理名 *</label>
+      <input type="text" id="fName" placeholder="例：肉じゃが">
+    </div>
+    <div class="field">
+      <label>写真</label>
+      <input type="file" id="fPhoto" accept="image/*">
+      <img id="photoPreview" alt="プレビュー">
+    </div>
+    <div class="field">
+      <label>材料（1行に1つ）</label>
+      <textarea id="fIngredients" placeholder="じゃがいも 3個&#10;牛肉 200g&#10;玉ねぎ 1個"></textarea>
+    </div>
+    <div class="field">
+      <label>作り方</label>
+      <textarea id="fSteps" placeholder="1. じゃがいもを切る&#10;2. 炒める&#10;3. 煮込む"></textarea>
+    </div>
+    <div class="field">
+      <label>カテゴリ・タグ（カンマ区切り）</label>
+      <input type="text" id="fTags" placeholder="和食, 煮物">
+    </div>
+    <div class="field">
+      <label>参考URL</label>
+      <input type="url" id="fUrl" placeholder="https://...">
+    </div>
+    <div class="field">
+      <label>メモ</label>
+      <textarea id="fMemo" placeholder="砂糖は少なめが好み、など"></textarea>
+    </div>
+    <div class="btnRow">
+      <button class="btn btnPrimary" id="saveBtn">保存</button>
+      <button class="btn btnGray" id="cancelBtn">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 取り込みモーダル（クイック追加ボタン用。選んだ方法の入力欄だけを表示する） ===== -->
+<div class="modal" id="importModal">
+  <div class="modalBox">
+    <h2 id="importTitle">取り込み</h2>
+    <div class="importBox" id="importUrlArea">
+      <label>レシピサイトのURLを貼り付けてください</label>
+      <div class="importRow">
+        <input type="url" id="importUrl" placeholder="https://cookpad.com/... など">
+        <button class="btn btnPrimary" id="importBtn">取り込み</button>
+      </div>
+    </div>
+    <div class="importBox" id="pasteArea">
+      <label id="pasteLabel">投稿の文章（キャプション）を貼り付けてください</label>
+      <button type="button" class="btn btnGray" id="ocrBtn" style="display:none;">📷 写真を選び直す</button>
+      <input type="file" id="ocrFile" accept="image/*" style="display:none">
+      <textarea id="importText" placeholder="【材料】や【作り方】の見出しがあると自動で仕分けされます"></textarea>
+      <button class="btn btnPrimary" id="parseTextBtn" style="margin-top:8px;">取り込み</button>
+    </div>
+    <div id="importStatus"></div>
+    <div class="btnRow">
+      <button class="btn btnGray" id="importCancelBtn">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 詳細モーダル ===== -->
+<div class="modal" id="detailModal">
+  <div class="modalBox">
+    <img id="detailPhoto" alt="料理写真">
+    <h2 id="detailName"></h2>
+    <div class="tags" id="detailTags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;"></div>
+    <div class="detailSection">
+      <h3>材料</h3>
+      <p id="detailIngredients"></p>
+    </div>
+    <div class="detailSection">
+      <h3>カロリー・PFCバランスの目安</h3>
+      <div id="nutritionBody"></div>
+    </div>
+    <div class="detailSection">
+      <h3>作り方</h3>
+      <p id="detailSteps"></p>
+    </div>
+    <div class="detailSection" id="detailUrlSection">
+      <h3>参考URL</h3>
+      <a id="detailUrl" target="_blank" rel="noopener"></a>
+    </div>
+    <div class="detailSection" id="detailMemoSection">
+      <h3>メモ</h3>
+      <p id="detailMemo"></p>
+    </div>
+    <div class="btnRow">
+      <button class="btn btnPrimary" id="editBtn">編集</button>
+      <button class="btn btnGray" id="closeBtn">閉じる</button>
+      <button class="btn btnDanger" id="deleteBtn">削除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// データの管理
+// レシピは localStorage（ブラウザ内の保存領域）に保存します。
+// ============================================================
+const STORAGE_KEY = "myRecipes";
+
+function loadRecipes() {
+  const json = localStorage.getItem(STORAGE_KEY);
+  return json ? JSON.parse(json) : [];
+}
+
+function saveRecipes(recipes) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(recipes));
+}
+
+let recipes = loadRecipes();
+let editingId = null;      // 編集中のレシピID（新規追加のときは null）
+let viewingId = null;      // 詳細表示中のレシピID
+let currentPhoto = "";     // フォームで選択中の写真データ
+let activeTag = "";        // 絞り込み中のタグ
+
+// ============================================================
+// 一覧の表示
+// ============================================================
+const recipeList = document.getElementById("recipeList");
+const searchBox = document.getElementById("searchBox");
+const tagFilter = document.getElementById("tagFilter");
+
+function renderList() {
+  const keyword = searchBox.value.trim().toLowerCase();
+
+  // 検索キーワードとタグで絞り込み
+  const filtered = recipes.filter(r => {
+    const matchKeyword = !keyword ||
+      r.name.toLowerCase().includes(keyword) ||
+      r.ingredients.toLowerCase().includes(keyword);
+    const matchTag = !activeTag || r.tags.includes(activeTag);
+    return matchKeyword && matchTag;
+  });
+
+  recipeList.innerHTML = "";
+
+  if (filtered.length === 0) {
+    recipeList.innerHTML = '<div id="emptyMsg">レシピがありません。上のボタンか「＋ 追加」から登録してみましょう！</div>';
+  }
+
+  for (const r of filtered) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const photoHtml = r.photo
+      ? `<img src="${r.photo}" alt="">`
+      : `<div class="noimg">🍽️</div>`;
+    const tagsHtml = r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
+    card.innerHTML = `${photoHtml}<div class="info"><div class="name">${escapeHtml(r.name)}</div><div class="tags">${tagsHtml}</div></div>`;
+    card.addEventListener("click", () => openDetail(r.id));
+    recipeList.appendChild(card);
+  }
+
+  renderTagFilter();
+}
+
+// 登録済みの全タグからフィルターボタンを作る
+function renderTagFilter() {
+  const allTags = [...new Set(recipes.flatMap(r => r.tags))];
+  tagFilter.innerHTML = "";
+  for (const tag of allTags) {
+    const btn = document.createElement("button");
+    btn.textContent = tag;
+    if (tag === activeTag) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      activeTag = (activeTag === tag) ? "" : tag; // もう一度押すと解除
+      renderList();
+    });
+    tagFilter.appendChild(btn);
+  }
+}
+
+// HTMLとして解釈されないように文字を無害化する（安全対策）
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+searchBox.addEventListener("input", renderList);
+
+// ============================================================
+// 追加・編集フォーム
+// ============================================================
+const editModal = document.getElementById("editModal");
+const detailModal = document.getElementById("detailModal");
+
+// フォームを空の状態に戻す
+function resetForm() {
+  editingId = null;
+  currentPhoto = "";
+  document.getElementById("editTitle").textContent = "レシピを追加";
+  setFormValues({ name: "", ingredients: "", steps: "", tags: [], url: "", memo: "", photo: "" });
+}
+
+// 編集フォームを開く（notice: 上部に表示するお知らせ文。省略時は非表示）
+function showEditModal(notice) {
+  const el = document.getElementById("editNotice");
+  if (notice) {
+    el.textContent = notice;
+    el.style.display = "block";
+  } else {
+    el.style.display = "none";
+  }
+  editModal.classList.add("open");
+}
+
+// 「＋ 追加」＝取り込み要素のない、純粋な手入力フォーム
+document.getElementById("addBtn").addEventListener("click", () => {
+  resetForm();
+  showEditModal();
+});
+
+// ============================================================
+// 取り込みモーダル
+// クイック追加ボタンで開く。選んだ方法の入力欄「だけ」を表示し、
+// 取り込みに成功したら入力済みの編集フォームに切り替える。
+// ============================================================
+const importModal = document.getElementById("importModal");
+
+const IMPORT_TITLES = {
+  url: "🔗 URLから取り込み",
+  paste: "📋 SNS投稿文から取り込み",
+  photo: "📷 写真から取り込み",
+};
+
+// 取り込みモーダルの表示を指定モードの入力欄だけに切り替える
+function setImportMode(mode) {
+  document.getElementById("importTitle").textContent = IMPORT_TITLES[mode];
+  document.getElementById("importUrlArea").style.display = (mode === "url") ? "block" : "none";
+  document.getElementById("pasteArea").style.display = (mode === "url") ? "none" : "block";
+  document.getElementById("ocrBtn").style.display = (mode === "photo") ? "inline-block" : "none";
+  document.getElementById("pasteLabel").textContent = (mode === "photo")
+    ? "写真から読み取った文字がここに入ります（誤字は直せます）"
+    : "投稿の文章（キャプション）を貼り付けてください";
+}
+
+function openImportModal(mode) {
+  resetForm(); // 取り込み先のフォームをまっさらにしておく
+  setImportMode(mode);
+  document.getElementById("importUrl").value = "";
+  document.getElementById("importText").value = "";
+  setImportStatus("");
+  importModal.classList.add("open");
+  if (mode === "url") document.getElementById("importUrl").focus();
+  if (mode === "paste") document.getElementById("importText").focus();
+  if (mode === "photo") document.getElementById("ocrFile").click(); // すぐに写真選択を開く
+}
+
+document.getElementById("importCancelBtn").addEventListener("click", () => {
+  importModal.classList.remove("open");
+});
+
+// 取り込み成功：取り込みモーダルを閉じて、入力済みフォームの確認に進む
+function finishImport(notice) {
+  importModal.classList.remove("open");
+  showEditModal(notice);
+}
+
+// トップページのクイック追加ボタン
+document.querySelectorAll(".quickAdd button").forEach((btn) => {
+  btn.addEventListener("click", () => openImportModal(btn.dataset.mode));
+});
+
+function setFormValues(r) {
+  document.getElementById("fName").value = r.name;
+  document.getElementById("fIngredients").value = r.ingredients;
+  document.getElementById("fSteps").value = r.steps;
+  document.getElementById("fTags").value = r.tags.join(", ");
+  document.getElementById("fUrl").value = r.url;
+  document.getElementById("fMemo").value = r.memo;
+  document.getElementById("fPhoto").value = "";
+  currentPhoto = r.photo;
+  const preview = document.getElementById("photoPreview");
+  if (r.photo) {
+    preview.src = r.photo;
+    preview.style.display = "block";
+  } else {
+    preview.style.display = "none";
+  }
+}
+
+// 画像を縮小して保存用のデータ文字列にする（容量節約のため長い辺を600pxまで）
+function imageToDataUrl(img) {
+  const MAX = 600;
+  let w = img.width, h = img.height;
+  if (w > h && w > MAX) { h = h * MAX / w; w = MAX; }
+  else if (h > MAX) { w = w * MAX / h; h = MAX; }
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+// 写真をフォームのプレビューに表示し、保存対象としてセットする
+function showPhotoPreview(dataUrl) {
+  currentPhoto = dataUrl;
+  const preview = document.getElementById("photoPreview");
+  preview.src = dataUrl;
+  preview.style.display = "block";
+}
+
+// 写真ファイルを選んだら、縮小してから保存用データにする
+document.getElementById("fPhoto").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    showPhotoPreview(imageToDataUrl(img));
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+});
+
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const name = document.getElementById("fName").value.trim();
+  if (!name) {
+    alert("料理名を入力してください");
+    return;
+  }
+  const data = {
+    name,
+    photo: currentPhoto,
+    ingredients: document.getElementById("fIngredients").value.trim(),
+    steps: document.getElementById("fSteps").value.trim(),
+    tags: document.getElementById("fTags").value.split(/[,、，]/).map(t => t.trim()).filter(t => t),
+    url: document.getElementById("fUrl").value.trim(),
+    memo: document.getElementById("fMemo").value.trim(),
+  };
+
+  try {
+    if (editingId === null) {
+      // 新規追加：IDには現在時刻を使う（重複しないので）
+      recipes.unshift({ id: Date.now(), ...data });
+    } else {
+      // 既存レシピの更新
+      const index = recipes.findIndex(r => r.id === editingId);
+      recipes[index] = { id: editingId, ...data };
+    }
+    saveRecipes(recipes);
+  } catch (err) {
+    alert("保存に失敗しました。写真の容量が大きすぎる可能性があります。");
+    return;
+  }
+
+  editModal.classList.remove("open");
+  renderList();
+});
+
+document.getElementById("cancelBtn").addEventListener("click", () => {
+  editModal.classList.remove("open");
+});
+
+// ============================================================
+// URLからの取り込み
+// 多くのレシピサイトはページ内に schema.org/Recipe という
+// 機械が読める形式でレシピ情報を埋め込んでいるので、それを読み取る。
+// ============================================================
+function setImportStatus(msg, isError) {
+  const el = document.getElementById("importStatus");
+  el.textContent = msg;
+  el.className = isError ? "error" : "";
+}
+
+// URLからレシピデータを取得する。ブラウザの安全ルール(CORS)で直接読めない
+// サイトが多いので、無料の中継サービス経由も含めて、
+// レシピが見つかるまで複数のルートを順に試す。
+async function fetchRecipeFromUrl(url) {
+  const attempts = [
+    url,
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+    "https://corsproxy.io/?url=" + encodeURIComponent(url),
+  ];
+  let fetchedSomething = false;
+  for (const u of attempts) {
+    try {
+      const res = await fetch(u);
+      if (!res.ok) continue;
+      fetchedSomething = true;
+      const recipe = findRecipeData(await res.text());
+      if (recipe) return recipe; // 見つかった！
+      // 取得できたがレシピデータがない（ボット対策ページ等の可能性）→ 次のルート
+    } catch (err) {
+      // このルートは失敗。次の方法を試す
+    }
+  }
+  throw new Error(fetchedSomething
+    ? "このページからレシピ情報を見つけられませんでした。手動で入力してください"
+    : "ページを取得できませんでした。URLを確認してください");
+}
+
+// HTMLの中から schema.org/Recipe のデータを探す
+function findRecipeData(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+  for (const s of scripts) {
+    try {
+      const found = searchRecipe(JSON.parse(s.textContent));
+      if (found) return found;
+    } catch (err) {
+      // 壊れたデータは飛ばして次を見る
+    }
+  }
+  return null;
+}
+
+// JSONの中を再帰的に探して @type が Recipe のものを返す
+function searchRecipe(node) {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const r = searchRecipe(n);
+      if (r) return r;
+    }
+    return null;
+  }
+  const type = node["@type"];
+  if (type === "Recipe" || (Array.isArray(type) && type.includes("Recipe"))) return node;
+  if (node["@graph"]) return searchRecipe(node["@graph"]);
+  return null;
+}
+
+// 作り方データを文字列の配列にする（サイトによって形式が違うため全対応）
+function collectSteps(ins, out = []) {
+  if (!ins) return out;
+  if (typeof ins === "string") {
+    if (ins.trim()) out.push(ins.trim());
+    return out;
+  }
+  if (Array.isArray(ins)) {
+    for (const item of ins) collectSteps(item, out);
+    return out;
+  }
+  if (ins.itemListElement) return collectSteps(ins.itemListElement, out); // 章立て形式
+  const text = ins.text || ins.name;
+  if (text && String(text).trim()) out.push(String(text).trim());
+  return out;
+}
+
+// カテゴリとキーワードからタグ候補を作る（多すぎないよう5個まで）
+function collectTags(recipe) {
+  const tags = [];
+  for (const v of [recipe.recipeCategory, recipe.keywords]) {
+    if (typeof v === "string") tags.push(...v.split(/[,、，]/));
+    else if (Array.isArray(v)) tags.push(...v);
+  }
+  return [...new Set(tags.map(t => String(t).trim()).filter(t => t))].slice(0, 5);
+}
+
+// 写真データから最初の画像URLを取り出す（文字列/配列/オブジェクトの3形式に対応）
+function firstImageUrl(image) {
+  if (!image) return "";
+  if (typeof image === "string") return image;
+  if (Array.isArray(image)) return firstImageUrl(image[0]);
+  return image.url || "";
+}
+
+// 画像URLを読み込んで縮小データにする。直接読めなければ中継サービス経由。
+function loadPhotoFromUrl(url) {
+  const attempts = [
+    url,
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  ];
+  return new Promise((resolve) => {
+    let i = 0;
+    const tryNext = () => {
+      if (i >= attempts.length) { resolve(""); return; }
+      const img = new Image();
+      img.crossOrigin = "anonymous"; // 縮小処理を許可してもらうための宣言
+      img.onload = () => {
+        try { resolve(imageToDataUrl(img)); } catch (err) { tryNext(); }
+      };
+      img.onerror = () => tryNext();
+      img.src = attempts[i++];
+    };
+    tryNext();
+  });
+}
+
+document.getElementById("importBtn").addEventListener("click", async () => {
+  const url = document.getElementById("importUrl").value.trim();
+  if (!url) {
+    setImportStatus("URLを入力してください", true);
+    return;
+  }
+  // Instagram等のSNSはログインが必要で自動取得できないため、貼り付け方式へ切り替える
+  if (/instagram\.com|threads\.net|tiktok\.com|twitter\.com|x\.com|facebook\.com/.test(url)) {
+    document.getElementById("fUrl").value = url; // URLは参考URL欄に残す
+    setImportMode("paste");
+    setImportStatus("SNSの投稿は自動で読み取れません。投稿の文章をコピーして貼り付けてください（URLは参考URL欄に保存済みです）");
+    return;
+  }
+
+  const btn = document.getElementById("importBtn");
+  btn.disabled = true;
+  setImportStatus("取り込み中…（10秒ほどかかることがあります）");
+
+  try {
+    const recipe = await fetchRecipeFromUrl(url);
+
+    // フォームに自動入力（保存はまだしない：ユーザーが確認してから保存ボタン）
+    document.getElementById("fName").value = recipe.name || "";
+    document.getElementById("fIngredients").value =
+      (recipe.recipeIngredient || recipe.ingredients || []).join("\n");
+    const steps = collectSteps(recipe.recipeInstructions);
+    document.getElementById("fSteps").value =
+      steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
+    document.getElementById("fTags").value = collectTags(recipe).join(", ");
+    document.getElementById("fUrl").value = url;
+
+    // 写真も取り込む（失敗しても本文は残す）
+    const imgUrl = firstImageUrl(recipe.image);
+    if (imgUrl) {
+      setImportStatus("写真を取り込み中…");
+      const dataUrl = await loadPhotoFromUrl(imgUrl);
+      if (dataUrl) showPhotoPreview(dataUrl);
+    }
+
+    finishImport("✅ 取り込みました！内容を確認して、下の「保存」を押してください");
+  } catch (err) {
+    setImportStatus(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ============================================================
+// 投稿文（キャプション）からの取り込み
+// Instagram等のレシピ投稿によくある「【材料】…【作り方】…」という
+// 書き方を手がかりに、貼り付けた文章を自動で仕分けする。
+// ============================================================
+// 見出し行かどうかの判定：絵文字や記号の飾りを外した「中身」で判定する
+// （「▼材料（2人分）」「◆ 作り方 ◆」のような飾り付き見出しにも対応）
+function headerCore(line) {
+  return line.replace(/[^\p{L}\p{N}]/gu, "");
+}
+function isHeaderLine(line, words, maxLen) {
+  if (line.includes("#")) return false; // ハッシュタグ行は見出しにしない
+  const core = headerCore(line);
+  return core !== "" && core.length <= (maxLen || 12) && words.some(w => core.includes(w));
+}
+
+// 「①」「1.」「STEP1」など、手順の番号で始まる行かどうか
+function isNumberedStep(line) {
+  return /^[①-⑳❶-❿⑴-⒇]|^\d+\s*[.)．）、]|^(STEP|step|Step)\s*\d/.test(line);
+}
+
+// 分量らしき表記（数字+単位、大さじ、適量など）を含む短い行かどうか
+function looksLikeIngredient(line) {
+  if (line.length > 30 || isNumberedStep(line)) return false;
+  return /(\d\s*(g|kg|ml|cc|個|本|枚|束|丁|玉|片|株|缶|袋|尾|かけ|合))|大さじ|小さじ|カップ|適量|少々|ひとつまみ/.test(line);
+}
+
+function parseRecipeText(text) {
+  const INGREDIENT_WORDS = ["材料"];
+  const STEP_WORDS = ["作り方", "作りかた", "つくり方", "手順", "調理"];
+  const STEP_WORDS_WEAK = ["レシピ"]; // 「レシピ」は料理名にも使われるので最後の手段
+  const END_WORDS = ["ポイント", "コツ", "保存", "注意", "アレンジ", "おまけ"];
+  // 宣伝・呼びかけの行（フォロー誘導など）は本文に入れない
+  const CTA = /フォロー|プロフィール|プロフ欄|いいね|コメント|リクエスト|DM|質問|他の(レシピ|投稿)|保存して|作ってみて|→\s*@|@[A-Za-z0-9_.]{3,}|[Ii]nstagram|https?:/;
+
+  const lines = text.split(/\r?\n/).map(l => l.replace(/　/g, " ").trim());
+
+  // ハッシュタグはタグ候補にする（長すぎるものは宣伝タグが多いので除外）
+  const tags = [...text.matchAll(/#([^\s#]+)/g)]
+    .map(m => m[1]).filter(t => t.length <= 8);
+  const uniqueTags = [...new Set(tags)].slice(0, 5);
+
+  // --- 見出しの位置を探す（作り方の見出しは材料より後ろから探す）---
+  let ingIndex = -1, stepIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (ingIndex === -1 && isHeaderLine(lines[i], INGREDIENT_WORDS)) ingIndex = i;
+    else if (ingIndex !== -1 && stepIndex === -1 && isHeaderLine(lines[i], STEP_WORDS)) stepIndex = i;
+  }
+  if (ingIndex === -1) stepIndex = lines.findIndex(l => isHeaderLine(l, STEP_WORDS));
+  if (stepIndex === -1) {
+    const weak = lines.findIndex((l, i) => i > ingIndex && isHeaderLine(l, STEP_WORDS_WEAK));
+    if (weak !== -1) stepIndex = weak;
+  }
+
+  // 作り方の見出しがなくても、「①…」「1.…」の番号行が始まる場所を手順とみなす
+  let stepContentStart = (stepIndex !== -1) ? stepIndex + 1 : -1;
+  if (stepContentStart === -1) {
+    const firstNumbered = lines.findIndex((l, i) => i > ingIndex && isNumberedStep(l));
+    if (firstNumbered !== -1) stepContentStart = firstNumbered;
+  }
+
+  // 材料の見出しがなければ、「分量らしい行」が2行以上続く場所を材料とみなす
+  let ingStart = (ingIndex !== -1) ? ingIndex + 1 : -1;
+  let ingEnd = (stepIndex !== -1) ? stepIndex
+    : (stepContentStart !== -1 ? stepContentStart : lines.length);
+  if (ingStart === -1) {
+    const limit = (stepContentStart !== -1) ? stepContentStart : lines.length;
+    for (let i = 0; i + 1 < limit; i++) {
+      if (looksLikeIngredient(lines[i]) && looksLikeIngredient(lines[i + 1])) {
+        ingStart = i;
+        break;
+      }
+    }
+    if (ingStart !== -1) {
+      ingEnd = ingStart;
+      while (ingEnd < limit && (looksLikeIngredient(lines[ingEnd]) || lines[ingEnd] === "")) ingEnd++;
+    }
+  }
+
+  // 指定範囲の行を集める（ハッシュタグ・飾り記号・宣伝行を取り除く）
+  function collectLines(from, to) {
+    const out = [];
+    for (let i = from; i < to && i < lines.length; i++) {
+      if (isHeaderLine(lines[i], END_WORDS, 6)) break; // 「ポイント」等の見出しが来たら終わり
+      // 「┈┈┈┈┈」のような罫線・飾り線が来たら、そこでセクション終わりとみなす
+      if (lines[i].length >= 5 && headerCore(lines[i]) === "") break;
+      if (CTA.test(lines[i])) continue;
+      // 「◆材料◆」のような見出しの重複が範囲内に残っていたら飛ばす
+      if (isHeaderLine(lines[i], [...INGREDIENT_WORDS, ...STEP_WORDS], 4)) continue;
+      const cleaned = lines[i]
+        .replace(/#[^\s#]+/g, "")           // ハッシュタグを除去
+        .replace(/^[^\p{L}\p{N}※]+/u, "")   // 行頭の飾り（・☑️、絵文字など）を除去。補足の「※」は残す
+        .trim();
+      if (cleaned) out.push(cleaned);
+    }
+    return out;
+  }
+
+  const ingredients = (ingStart !== -1) ? collectLines(ingStart, ingEnd) : [];
+  const steps = (stepContentStart !== -1) ? collectLines(stepContentStart, lines.length) : [];
+
+  // 1行から料理名らしい部分を取り出す（ハッシュタグ・飾りカッコ・記号を除去）
+  function extractName(line) {
+    const noTags = line.replace(/#[^\s#]+/g, "");
+    // 【保存版】【簡単】のような飾りカッコを外した残りを優先する
+    const outside = noTags.replace(/[【〈《\[].*?[】〉》\]]/g, "")
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .replace(/[^\p{L}\p{N}）)！!？?♪〜ー]+$/u, "")
+      .trim();
+    if (outside.length >= 2) return outside;
+    // カッコの中身しかない行（「【肉じゃが】」など）はその中身を使う
+    const inside = noTags.match(/[【〈《\[](.{2,25}?)[】〉》\]]/);
+    return inside ? inside[1].trim() : "";
+  }
+
+  // --- 料理名 ---
+  const bodyStarts = [ingIndex, ingStart, stepIndex, stepContentStart].filter(i => i !== -1);
+  const bodyStart = bodyStarts.length ? Math.min(...bodyStarts) : lines.length;
+
+  let name = "";
+  // 1) 「」『』で囲まれた部分は料理名の可能性が高いので最優先
+  for (const line of lines.slice(0, Math.min(bodyStart, 12))) {
+    const m = line.match(/[「『](.{2,25}?)[」』]/);
+    if (m) { name = m[1].trim(); break; }
+  }
+  // 2) 材料の直前の行は料理名であることが多い（「◽︎ 絶品油そば」スタイル）
+  if (!name) {
+    for (let i = bodyStart - 1; i >= 0 && i >= bodyStart - 6; i--) {
+      const line = lines[i];
+      // 空行・罫線・宣伝・「材料はこちら」のような行は飛ばして、さらに上を見る
+      if (!line || headerCore(line) === "" || CTA.test(line)) continue;
+      if (isHeaderLine(line, [...INGREDIENT_WORDS, ...STEP_WORDS])) continue;
+      const cand = extractName(line);
+      // 長すぎる行は前置きの文章なので採用しない（次の方法に任せる）
+      if (cand && cand.length <= 30) name = cand;
+      break; // 直前の意味のある1行だけを見る
+    }
+  }
+  // 3) それでも見つからなければ、冒頭の意味のある行を使う
+  if (!name) {
+    for (const line of lines.slice(0, Math.min(bodyStart, 8))) {
+      if (CTA.test(line)) continue;
+      const cand = extractName(line);
+      if (cand) { name = cand; break; }
+    }
+  }
+
+  return {
+    name,
+    ingredients: ingredients.join("\n"),
+    steps: steps.join("\n"),
+    tags: uniqueTags,
+  };
+}
+
+document.getElementById("parseTextBtn").addEventListener("click", () => {
+  const text = document.getElementById("importText").value.trim();
+  if (!text) {
+    setImportStatus("文章を貼り付けてください", true);
+    return;
+  }
+  const parsed = parseRecipeText(text);
+
+  // 空欄を上書きしないよう、読み取れた項目だけフォームに入れる
+  if (parsed.name) document.getElementById("fName").value = parsed.name;
+  if (parsed.ingredients) document.getElementById("fIngredients").value = parsed.ingredients;
+  if (parsed.steps) document.getElementById("fSteps").value = parsed.steps;
+  if (parsed.tags.length) document.getElementById("fTags").value = parsed.tags.join(", ");
+
+  if (!parsed.ingredients && !parsed.steps) {
+    // 見出しが見つからない場合は、全文をメモに残して手直ししてもらう
+    document.getElementById("fMemo").value = text;
+    finishImport("「材料」「作り方」が見つからなかったため、全文をメモ欄に入れました。手直しして保存してください");
+  } else {
+    finishImport("✅ 取り込みました！内容を確認して、下の「保存」を押してください");
+  }
+});
+
+// ============================================================
+// 写真からの文字読み取り（OCR）
+// 無料のOCRライブラリ Tesseract.js を初回利用時にだけ読み込む。
+// 読み取った文字は貼り付け欄に入れて、既存の自動仕分けにつなげる
+// （誤読があってもユーザーが直してから取り込めるように）。
+// ============================================================
+let ocrWorker = null;                 // 一度準備したら使い回す
+let ocrProgressHandler = () => {};    // 読み取り進捗の表示先
+
+// Tesseract.js本体をインターネットから読み込む（初回のみ）
+function loadTesseractScript() {
+  return new Promise((resolve, reject) => {
+    if (window.Tesseract) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("読み取り機能の読み込みに失敗しました。インターネット接続を確認してください"));
+    document.head.appendChild(s);
+  });
+}
+
+async function getOcrWorker() {
+  await loadTesseractScript();
+  if (!ocrWorker) {
+    ocrWorker = await Tesseract.createWorker("jpn", 1, {
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          ocrProgressHandler(Math.round(m.progress * 100));
+        }
+      },
+    });
+  }
+  return ocrWorker;
+}
+
+// 画像（ファイルやcanvas）から文字を読み取って貼り付け欄に入れる
+async function runOcr(imageSource) {
+  const btn = document.getElementById("ocrBtn");
+  btn.disabled = true;
+  try {
+    setImportStatus("読み取りの準備中…（初回は部品のダウンロードで1分ほどかかることがあります）");
+    ocrProgressHandler = (pct) => setImportStatus(`文字を読み取り中… ${pct}%`);
+    const worker = await getOcrWorker();
+    const { data } = await worker.recognize(imageSource);
+    // 日本語OCRは文字の間に余計なスペースが入りやすいので取り除く
+    const cleaned = data.text
+      .replace(/(?<=[　-ヿ一-鿿])[ \t]+(?=[　-ヿ一-鿿])/g, "")
+      .trim();
+    if (!cleaned) {
+      throw new Error("文字を読み取れませんでした。明るくピントの合った写真で試してください");
+    }
+    document.getElementById("importText").value = cleaned;
+    setImportStatus("✅ 読み取りました！誤字があれば直して「取り込み」を押してください");
+  } catch (err) {
+    setImportStatus(err.message || "読み取りに失敗しました", true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("ocrBtn").addEventListener("click", () => {
+  document.getElementById("ocrFile").click();
+});
+
+document.getElementById("ocrFile").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = ""; // 同じ写真をもう一度選べるようにリセット
+  runOcr(file);
+});
+
+// ============================================================
+// カロリー・PFCバランスの概算
+// 材料欄の文字を解析し、内蔵の食品成分データ（100gあたりの
+// kcal/たんぱく質/脂質/炭水化物）と照合して合計する。
+// piece: 1個(本/枚…)あたりの目安グラム数
+// units: 単位ごとに重さが違う場合の個別指定
+// d: 比重（大さじ・ml→グラム換算用。省略時は1）
+// ============================================================
+const FOOD_DB = [
+  // --- 肉 ---
+  { names:["鶏むね","鶏胸","むね肉"], k:145,p:21,f:6,c:0, piece:250 },
+  { names:["鶏もも","もも肉"], k:200,p:17,f:14,c:0, piece:250 },
+  { names:["ささみ","ササミ"], k:105,p:24,f:1,c:0, piece:45 },
+  { names:["鶏ひき肉","鶏挽き肉","鶏ミンチ"], k:170,p:17,f:11,c:0 },
+  { names:["手羽元","手羽先"], k:200,p:18,f:14,c:0, piece:60 },
+  { names:["鶏肉"], k:190,p:18,f:12,c:0, piece:250 },
+  { names:["豚バラ","豚ばら"], k:395,p:14,f:35,c:0 },
+  { names:["豚ロース"], k:250,p:19,f:19,c:0, piece:100 },
+  { names:["豚ひき肉","豚挽き肉","豚ミンチ"], k:210,p:18,f:15,c:0 },
+  { names:["豚こま","豚コマ","豚切り落とし","豚肉"], k:220,p:19,f:16,c:0 },
+  { names:["牛ひき肉","牛挽き肉","牛ミンチ"], k:250,p:17,f:20,c:0 },
+  { names:["牛こま","牛切り落とし","牛薄切り","牛もも","牛肉"], k:250,p:19,f:18,c:0 },
+  { names:["合いびき","合挽き","ひき肉","挽き肉","ミンチ"], k:230,p:18,f:17,c:0 },
+  { names:["ベーコン"], k:400,p:13,f:39,c:0, piece:17 },
+  { names:["ハム"], k:115,p:17,f:4,c:2, piece:15 },
+  { names:["ソーセージ","ウインナー"], k:320,p:13,f:29,c:3, piece:20 },
+  // --- 魚介 ---
+  { names:["鮭","サーモン","さけ"], k:130,p:22,f:4,c:0, piece:80 },
+  { names:["さば","サバ","鯖"], k:250,p:21,f:17,c:0, piece:100 },
+  { names:["たら","タラ","鱈"], k:72,p:18,f:0.2,c:0, piece:80 },
+  { names:["ぶり","ブリ","鰤"], k:220,p:21,f:17,c:0, piece:80 },
+  { names:["まぐろ","マグロ","鮪"], k:110,p:24,f:1,c:0 },
+  { names:["えび","エビ","海老"], k:90,p:18,f:0.5,c:0, piece:15 },
+  { names:["いか","イカ"], k:76,p:18,f:0.8,c:0, piece:250 },
+  { names:["たこ","タコ"], k:70,p:16,f:0.7,c:0 },
+  { names:["ツナ"], k:250,p:17,f:20,c:0, piece:70 },
+  { names:["しらす"], k:110,p:23,f:2,c:0 },
+  { names:["あさり","アサリ"], k:27,p:6,f:0.3,c:0.4 },
+  { names:["ちくわ"], k:121,p:12,f:2,c:13.5, piece:30 },
+  { names:["かまぼこ"], k:95,p:12,f:0.9,c:9.7 },
+  { names:["カニカマ","かにかま"], k:90,p:12,f:0.5,c:9.2, piece:10 },
+  // --- 卵・乳製品 ---
+  { names:["卵","たまご","玉子"], k:150,p:12,f:10,c:0.4, piece:50 },
+  { names:["牛乳"], k:61,p:3.3,f:3.8,c:4.8 },
+  { names:["粉チーズ"], k:445,p:44,f:30,c:1.9, d:0.5 },
+  { names:["チーズ"], k:340,p:23,f:26,c:1.3, piece:18 },
+  { names:["バター"], k:700,p:0.6,f:81,c:0.2, piece:10, d:0.9 },
+  { names:["ヨーグルト"], k:56,p:3.6,f:3,c:4.9 },
+  { names:["生クリーム"], k:400,p:2,f:43,c:3 },
+  // --- 豆・大豆製品 ---
+  { names:["厚揚げ"], k:143,p:10.7,f:11.3,c:0.9, piece:120 },
+  { names:["油揚げ"], k:377,p:23,f:34,c:0.5, piece:30 },
+  { names:["豆腐"], k:60,p:5.3,f:3.5,c:2, piece:300 },
+  { names:["納豆"], k:190,p:16.5,f:10,c:12, piece:45 },
+  { names:["豆乳"], k:44,p:3.6,f:2,c:3.1 },
+  { names:["大豆"], k:124,p:13,f:7,c:8 },
+  // --- 野菜・いも ---
+  { names:["じゃがいも","ジャガイモ","じゃが芋"], k:76,p:1.6,f:0.1,c:17.6, piece:150 },
+  { names:["玉ねぎ","たまねぎ","タマネギ","玉葱"], k:33,p:1,f:0.1,c:8.4, piece:200 },
+  { names:["にんじん","人参","ニンジン"], k:35,p:0.7,f:0.2,c:8.7, piece:150 },
+  { names:["なす","ナス","茄子"], k:22,p:1.1,f:0.1,c:5.1, piece:80 },
+  { names:["ミニトマト","プチトマト"], k:30,p:1.1,f:0.1,c:7.2, piece:15 },
+  { names:["トマト缶","カットトマト","ホールトマト"], k:20,p:0.9,f:0.2,c:4.4, piece:400 },
+  { names:["トマト"], k:20,p:0.7,f:0.1,c:4.7, piece:150 },
+  { names:["きゅうり","キュウリ","胡瓜"], k:14,p:1,f:0.1,c:3, piece:100 },
+  { names:["キャベツ"], k:23,p:1.3,f:0.2,c:5.2, piece:1000, units:{枚:50} },
+  { names:["白菜"], k:14,p:0.8,f:0.1,c:3.2, piece:2000, units:{枚:100} },
+  { names:["ほうれん草","ホウレン草"], k:20,p:2.2,f:0.4,c:3.1, piece:200 },
+  { names:["小松菜"], k:14,p:1.5,f:0.2,c:2.4, piece:250 },
+  { names:["ブロッコリー"], k:33,p:4.3,f:0.5,c:5.2, piece:250, units:{房:15} },
+  { names:["ピーマン"], k:22,p:0.9,f:0.2,c:5.1, piece:35 },
+  { names:["パプリカ"], k:28,p:1,f:0.2,c:6.6, piece:150 },
+  { names:["大根"], k:18,p:0.5,f:0.1,c:4.1, piece:900 },
+  { names:["かぼちゃ","カボチャ","南瓜"], k:91,p:1.9,f:0.3,c:20.6, piece:1200 },
+  { names:["さつまいも","サツマイモ","さつま芋"], k:132,p:1.2,f:0.2,c:31.5, piece:250 },
+  { names:["里芋","さといも"], k:58,p:1.5,f:0.1,c:13.1, piece:50 },
+  { names:["れんこん","レンコン","蓮根"], k:66,p:1.9,f:0.1,c:15.5, piece:150 },
+  { names:["ごぼう","ゴボウ"], k:65,p:1.8,f:0.1,c:15.4, piece:150 },
+  { names:["長ねぎ","長ネギ","白ねぎ","ねぎ","ネギ","葱"], k:34,p:1.4,f:0.1,c:8.3, piece:100 },
+  { names:["にら","ニラ"], k:21,p:1.7,f:0.3,c:4, piece:100 },
+  { names:["もやし"], k:14,p:1.7,f:0.1,c:2.6, piece:200 },
+  { names:["レタス"], k:12,p:0.6,f:0.1,c:2.8, piece:300, units:{枚:30} },
+  { names:["アスパラ"], k:22,p:2.6,f:0.2,c:3.9, piece:20 },
+  { names:["オクラ"], k:30,p:2.1,f:0.2,c:6.6, piece:10 },
+  { names:["ズッキーニ"], k:14,p:1.3,f:0.1,c:2.8, piece:200 },
+  { names:["枝豆"], k:135,p:11.7,f:6.2,c:8.8 },
+  { names:["コーン"], k:82,p:2.7,f:0.5,c:18.6, piece:190 },
+  { names:["アボカド"], k:178,p:2.1,f:17.5,c:7.9, piece:140 },
+  { names:["ミックスベジタブル"], k:67,p:3,f:0.7,c:15.1 },
+  { names:["キムチ"], k:46,p:2.8,f:0.3,c:7.9 },
+  { names:["梅干し"], k:33,p:0.9,f:0.2,c:10.5, piece:10 },
+  // --- きのこ ---
+  { names:["しめじ"], k:18,p:2.7,f:0.5,c:4.8, piece:100 },
+  { names:["えのき","エノキ"], k:22,p:2.7,f:0.2,c:7.6, piece:100 },
+  { names:["しいたけ","シイタケ","椎茸"], k:19,p:3,f:0.3,c:4.9, piece:15 },
+  { names:["まいたけ","マイタケ","舞茸"], k:15,p:2,f:0.5,c:4.4, piece:100 },
+  { names:["エリンギ"], k:19,p:2.8,f:0.4,c:6, piece:40 },
+  { names:["マッシュルーム"], k:11,p:2.9,f:0.3,c:2.1, piece:10 },
+  // --- 香味 ---
+  { names:["にんにく","ニンニク","大蒜"], k:136,p:6.4,f:0.9,c:27.5, piece:6 },
+  { names:["生姜","しょうが","ショウガ"], k:30,p:0.9,f:0.3,c:6.6, piece:15 },
+  // --- 主食・粉もの ---
+  { names:["ご飯","ごはん","白米"], k:168,p:2.5,f:0.3,c:37.1, piece:150 },
+  { names:["米"], k:342,p:6.1,f:0.9,c:77.6, units:{合:150} },
+  { names:["パスタ","スパゲッティ"], k:380,p:12.9,f:1.8,c:73.9, piece:100 },
+  { names:["うどん"], k:105,p:2.6,f:0.4,c:21.6, piece:200 },
+  { names:["そば"], k:130,p:4.8,f:1,c:26, piece:170 },
+  { names:["中華麺","焼きそば麺"], k:281,p:8.6,f:1.2,c:55.7, piece:120 },
+  { names:["食パン"], k:260,p:9,f:4.4,c:46.6, piece:60 },
+  { names:["小麦粉","薄力粉"], k:367,p:8.3,f:1.5,c:75.8, d:0.6 },
+  { names:["片栗粉"], k:330,p:0.1,f:0.1,c:81.6, d:0.6 },
+  { names:["パン粉"], k:373,p:14.6,f:6.8,c:63.4, d:0.2 },
+  { names:["餅","もち"], k:223,p:4,f:0.6,c:50.8, piece:50 },
+  { names:["餃子の皮"], k:291,p:9.3,f:1.4,c:57, piece:6 },
+  { names:["春巻きの皮"], k:288,p:8.3,f:1.6,c:57.7, piece:13 },
+  // --- 調味料・油 ---
+  { names:["ごま油","胡麻油"], k:920,p:0,f:100,c:0, d:0.9 },
+  { names:["オリーブオイル","オリーブ油"], k:920,p:0,f:100,c:0, d:0.9 },
+  { names:["サラダ油","油"], k:920,p:0,f:100,c:0, d:0.9 },
+  { names:["すりごま","いりごま","白ごま","黒ごま","ごま"], k:600,p:20,f:54,c:18, d:0.6 },
+  { names:["砂糖"], k:384,p:0,f:0,c:99.3, d:0.6 },
+  { names:["醤油","しょうゆ","しょう油"], k:71,p:7.7,f:0,c:10.1, d:1.2 },
+  { names:["みりん"], k:241,p:0.3,f:0,c:43.2, d:1.2 },
+  { names:["料理酒","酒"], k:103,p:0.4,f:0,c:4.9 },
+  { names:["酢"], k:25,p:0.1,f:0,c:2.4 },
+  { names:["味噌","みそ"], k:182,p:12.5,f:6,c:21.9, d:1.2 },
+  { names:["めんつゆ"], k:44,p:2.2,f:0,c:8.7, d:1.1 },
+  { names:["ケチャップ"], k:106,p:1.6,f:0.2,c:27.6, d:1.15 },
+  { names:["マヨネーズ"], k:700,p:1.4,f:76,c:3.6, d:0.8 },
+  { names:["オイスターソース"], k:107,p:7.7,f:0.3,c:18.3, d:1.2 },
+  { names:["中濃ソース","ウスターソース","ソース"], k:132,p:0.8,f:0.1,c:30.9, d:1.2 },
+  { names:["豆板醤"], k:60,p:2,f:2.3,c:7.9 },
+  { names:["コチュジャン"], k:250,p:3.6,f:2.8,c:52 },
+  { names:["焼肉のたれ"], k:165,p:4,f:2,c:33, d:1.2 },
+  { names:["ポン酢"], k:47,p:3.4,f:0,c:10.8, d:1.1 },
+  { names:["白だし"], k:54,p:2,f:0,c:14, d:1.1 },
+  { names:["コンソメ"], k:235,p:7,f:4.3,c:42, piece:5, d:0.5 },
+  { names:["鶏ガラスープ","鶏がら"], k:210,p:22,f:4,c:31, d:0.5 },
+  { names:["顆粒だし","だしの素","ほんだし"], k:224,p:24,f:0.3,c:31, d:0.5 },
+  { names:["カレールー","カレールウ"], k:500,p:6.5,f:34,c:44.7, piece:20 },
+  { names:["カレー粉"], k:415,p:13,f:12,c:63, d:0.4 },
+  { names:["はちみつ","蜂蜜","ハチミツ"], k:294,p:0.3,f:0,c:79.7, d:1.4 },
+  // --- その他 ---
+  { names:["わかめ","ワカメ"], k:17,p:1.9,f:0.2,c:3.6 },
+  { names:["のり","海苔"], k:188,p:41,f:3.7,c:44, piece:3 },
+  { names:["こんにゃく"], k:5,p:0.1,f:0,c:2.3, piece:250 },
+  { names:["しらたき","白滝"], k:6,p:0.2,f:0,c:3, piece:200 },
+  // --- カロリーほぼゼロ（一致すれば計算対象外にする）---
+  // 実在の食材が優先されるよう、必ずリストの最後に置くこと
+  { names:["水","お湯","熱湯","だし汁","だし","塩","こしょう","胡椒","コショウ","七味","一味","わさび","からし","ラー油"], k:0,p:0,f:0,c:0 },
+];
+
+// 材料名に一致する食品を探す（「ごま」と「ごま油」なら長い方を優先）
+function findFood(line) {
+  let best = null, bestLen = 0;
+  for (const entry of FOOD_DB) {
+    for (const name of entry.names) {
+      if (name.length > bestLen && line.includes(name)) {
+        best = entry;
+        bestLen = name.length;
+      }
+    }
+  }
+  return best;
+}
+
+// 材料の1行から分量（グラム数）を読み取る。読み取れなければ null
+function parseGrams(line, entry) {
+  const NUM = "(\\d+(?:\\.\\d+)?(?:/\\d+)?)";
+  const toNumber = (s) => {
+    if (s.includes("/")) { const [a, b] = s.split("/"); return Number(a) / Number(b); }
+    return parseFloat(s);
+  };
+  const density = entry.d || 1;
+  let m;
+
+  // 大さじ・小さじ・カップ（「大さじ2」「2カップ」どちらの順でもOK）
+  if ((m = line.match(new RegExp("(大さじ|大匙|小さじ|小匙|カップ)\\s*" + NUM))) ||
+      (m = line.match(new RegExp(NUM + "\\s*(大さじ|大匙|小さじ|小匙|カップ)")))) {
+    const unitFirst = isNaN(parseFloat(m[1]));
+    const unit = unitFirst ? m[1] : m[2];
+    const n = toNumber(unitFirst ? m[2] : m[1]);
+    const ml = unit.startsWith("大") ? 15 : unit.startsWith("小") ? 5 : 200;
+    return n * ml * density;
+  }
+  // グラム・ミリリットルの直接指定
+  if ((m = line.match(new RegExp(NUM + "\\s*(kg|ml|cc|g|l)", "i")))) {
+    const n = toNumber(m[1]);
+    const unit = m[2].toLowerCase();
+    if (unit === "kg") return n * 1000;
+    if (unit === "l") return n * 1000 * density;
+    if (unit === "g") return n;
+    return n * density; // ml, cc
+  }
+  // 個数（1個あたりの重さが分かっている食材のみ計算できる）
+  if ((m = line.match(new RegExp(NUM + "\\s*(個|本|枚|束|丁|玉|片|株|缶|袋|尾|かけ|切れ|房|節|把|パック|杯|合|皿|コ)")))) {
+    const per = (entry.units && entry.units[m[2]]) || entry.piece;
+    return per ? toNumber(m[1]) * per : null;
+  }
+  // 「半分」「半玉」など
+  if (/半分|半個|半本|半玉|半束|半丁/.test(line) && entry.piece) return entry.piece * 0.5;
+  // 少量の表現はほぼゼロとして扱う
+  if (/適量|少々|少量|ひとつまみ|お好み/.test(line)) return 0;
+  return null;
+}
+
+// 材料欄の全行から合計の栄養を概算する
+function estimateNutrition(ingredientsText) {
+  const totals = { k: 0, p: 0, f: 0, c: 0 };
+  const skipped = [];
+  let matched = false;
+
+  const lines = ingredientsText.split("\n").map(l => l.trim()).filter(l => l);
+  for (const raw of lines) {
+    // 全角の数字・記号を半角に直してから解析する
+    const line = raw
+      .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/／/g, "/").replace(/．/g, ".").replace(/ｇ/g, "g");
+    const entry = findFood(line);
+    if (!entry) { skipped.push(raw); continue; }
+    if (entry.k === 0) { matched = true; continue; } // 水・塩などはカロリーなし
+    const grams = parseGrams(line, entry);
+    if (grams === null) { skipped.push(raw); continue; }
+    matched = true;
+    totals.k += grams * entry.k / 100;
+    totals.p += grams * entry.p / 100;
+    totals.f += grams * entry.f / 100;
+    totals.c += grams * entry.c / 100;
+  }
+  return { totals, skipped, matched };
+}
+
+// 詳細画面に栄養の概算を表示する
+function renderNutrition(ingredientsText) {
+  const el = document.getElementById("nutritionBody");
+  const result = estimateNutrition(ingredientsText || "");
+
+  if (!result.matched) {
+    el.innerHTML = '<p style="color:#999;font-size:0.85rem;">材料から計算できませんでした（分量入りで材料を書くと表示されます）</p>';
+    return;
+  }
+
+  const t = result.totals;
+  // PFCの割合はカロリー換算で出す（たんぱく質・炭水化物は1gあたり4kcal、脂質は9kcal）
+  const pCal = t.p * 4, fCal = t.f * 9, cCal = t.c * 4;
+  const sum = (pCal + fCal + cCal) || 1;
+  const pPct = Math.round(pCal / sum * 100);
+  const fPct = Math.round(fCal / sum * 100);
+  const cPct = 100 - pPct - fPct;
+
+  const skippedHtml = result.skipped.length
+    ? `<div class="nutNote">計算に含めていない材料: ${result.skipped.map(escapeHtml).join("、")}</div>`
+    : "";
+
+  el.innerHTML = `
+    <div class="nutKcal">約 ${Math.round(t.k / 10) * 10} kcal
+      <span style="font-size:0.75rem;color:#999;font-weight:normal;">（レシピ全体）</span>
+    </div>
+    <div class="pfcBar">
+      <div class="p" style="width:${pPct}%"></div>
+      <div class="f" style="width:${fPct}%"></div>
+      <div class="c" style="width:${cPct}%"></div>
+    </div>
+    <div class="pfcLegend">
+      <span><span class="dot" style="background:#5b9bd5"></span>たんぱく質 ${Math.round(t.p)}g（${pPct}%）</span>
+      <span><span class="dot" style="background:#f2b04c"></span>脂質 ${Math.round(t.f)}g（${fPct}%）</span>
+      <span><span class="dot" style="background:#e8734a"></span>炭水化物 ${Math.round(t.c)}g（${cPct}%）</span>
+    </div>
+    ${skippedHtml}
+    <div class="nutNote">※一般的な食品成分からの概算です。分量の書き方によって誤差が出ます。</div>`;
+}
+
+// ============================================================
+// 詳細表示
+// ============================================================
+function openDetail(id) {
+  const r = recipes.find(r => r.id === id);
+  if (!r) return;
+  viewingId = id;
+
+  const photo = document.getElementById("detailPhoto");
+  if (r.photo) {
+    photo.src = r.photo;
+    photo.style.display = "block";
+  } else {
+    photo.style.display = "none";
+  }
+  document.getElementById("detailName").textContent = r.name;
+  document.getElementById("detailTags").innerHTML =
+    r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
+  document.getElementById("detailIngredients").textContent = r.ingredients || "（未記入）";
+  renderNutrition(r.ingredients);
+  document.getElementById("detailSteps").textContent = r.steps || "（未記入）";
+
+  const urlSection = document.getElementById("detailUrlSection");
+  if (r.url) {
+    urlSection.style.display = "block";
+    const a = document.getElementById("detailUrl");
+    a.href = r.url;
+    a.textContent = r.url;
+  } else {
+    urlSection.style.display = "none";
+  }
+
+  const memoSection = document.getElementById("detailMemoSection");
+  if (r.memo) {
+    memoSection.style.display = "block";
+    document.getElementById("detailMemo").textContent = r.memo;
+  } else {
+    memoSection.style.display = "none";
+  }
+
+  detailModal.classList.add("open");
+}
+
+document.getElementById("closeBtn").addEventListener("click", () => {
+  detailModal.classList.remove("open");
+});
+
+document.getElementById("editBtn").addEventListener("click", () => {
+  const r = recipes.find(r => r.id === viewingId);
+  if (!r) return;
+  detailModal.classList.remove("open");
+  editingId = r.id;
+  document.getElementById("editTitle").textContent = "レシピを編集";
+  setFormValues(r);
+  showEditModal();
+});
+
+document.getElementById("deleteBtn").addEventListener("click", () => {
+  if (!confirm("このレシピを削除しますか？")) return;
+  recipes = recipes.filter(r => r.id !== viewingId);
+  saveRecipes(recipes);
+  detailModal.classList.remove("open");
+  renderList();
+});
+
+// モーダルの外側（暗い部分）をタップしたら閉じる
+for (const modal of [editModal, detailModal, importModal]) {
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.remove("open");
+  });
+}
+
+// 最初の表示
+renderList();
+
+// オフライン対応：Service Workerを登録する（対応していない環境では何もしない）
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {
+    // 登録に失敗してもアプリ自体は普通に使える
+  });
+}
+</script>
+</body>
+</html>
