@@ -151,6 +151,20 @@
     padding: 1px 8px;
     font-size: 0.7rem;
   }
+  /* カテゴリのバッジ（タグと区別できる青系） */
+  .catChip {
+    background: #e3edf7;
+    color: #3a6ea5;
+  }
+  /* カテゴリ絞り込みボタン（タグの絞り込みと色違い） */
+  #catFilter button {
+    border-color: #3a6ea5;
+    color: #3a6ea5;
+  }
+  #catFilter button.active {
+    background: #3a6ea5;
+    color: white;
+  }
   #emptyMsg {
     grid-column: 1 / -1;
     text-align: center;
@@ -197,13 +211,14 @@
     margin-bottom: 4px;
     color: #666;
   }
-  .field input[type="text"], .field input[type="url"], .field textarea {
+  .field input[type="text"], .field input[type="url"], .field textarea, .field select {
     width: 100%;
     padding: 8px 10px;
     border: 1px solid #ddd;
     border-radius: 8px;
     font-size: 1rem;
     font-family: inherit;
+    background: white;
   }
   .field textarea { min-height: 90px; resize: vertical; }
   #photoPreview {
@@ -341,6 +356,7 @@
     <button data-mode="photo">📷 写真から<br>読み取り</button>
   </div>
   <input type="text" id="searchBox" placeholder="レシピ名・材料で検索…">
+  <div class="tagFilter" id="catFilter"></div>
   <div class="tagFilter" id="tagFilter"></div>
 </div>
 
@@ -354,6 +370,18 @@
     <div class="field">
       <label>料理名 *</label>
       <input type="text" id="fName" placeholder="例：肉じゃが">
+    </div>
+    <div class="field">
+      <label>カテゴリ</label>
+      <select id="fCategory">
+        <option value="">未分類</option>
+        <option>主食</option>
+        <option>主菜</option>
+        <option>副菜</option>
+        <option>汁物</option>
+        <option>デザート</option>
+        <option>その他</option>
+      </select>
     </div>
     <div class="field">
       <label>写真</label>
@@ -467,6 +495,10 @@ let editingId = null;      // 編集中のレシピID（新規追加のときは
 let viewingId = null;      // 詳細表示中のレシピID
 let currentPhoto = "";     // フォームで選択中の写真データ
 let activeTag = "";        // 絞り込み中のタグ
+let activeCategory = "";   // 絞り込み中のカテゴリ
+
+// カテゴリの表示順（この順でボタンを並べる）
+const CATEGORIES = ["主食", "主菜", "副菜", "汁物", "デザート", "その他"];
 
 // ============================================================
 // 一覧の表示
@@ -484,7 +516,8 @@ function renderList() {
       r.name.toLowerCase().includes(keyword) ||
       r.ingredients.toLowerCase().includes(keyword);
     const matchTag = !activeTag || r.tags.includes(activeTag);
-    return matchKeyword && matchTag;
+    const matchCategory = !activeCategory || r.category === activeCategory;
+    return matchKeyword && matchTag && matchCategory;
   });
 
   recipeList.innerHTML = "";
@@ -499,13 +532,32 @@ function renderList() {
     const photoHtml = r.photo
       ? `<img src="${r.photo}" alt="">`
       : `<div class="noimg">🍽️</div>`;
-    const tagsHtml = r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
+    const catHtml = r.category ? `<span class="tagChip catChip">${escapeHtml(r.category)}</span>` : "";
+    const tagsHtml = catHtml + r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
     card.innerHTML = `${photoHtml}<div class="info"><div class="name">${escapeHtml(r.name)}</div><div class="tags">${tagsHtml}</div></div>`;
     card.addEventListener("click", () => openDetail(r.id));
     recipeList.appendChild(card);
   }
 
+  renderCategoryFilter();
   renderTagFilter();
+}
+
+// 使われているカテゴリの絞り込みボタンを作る（決まった順で並べる）
+function renderCategoryFilter() {
+  const catFilter = document.getElementById("catFilter");
+  const used = CATEGORIES.filter(c => recipes.some(r => r.category === c));
+  catFilter.innerHTML = "";
+  for (const cat of used) {
+    const btn = document.createElement("button");
+    btn.textContent = cat;
+    if (cat === activeCategory) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      activeCategory = (activeCategory === cat) ? "" : cat; // もう一度押すと解除
+      renderList();
+    });
+    catFilter.appendChild(btn);
+  }
 }
 
 // 登録済みの全タグからフィルターボタンを作る
@@ -618,6 +670,7 @@ document.querySelectorAll(".quickAdd button").forEach((btn) => {
 
 function setFormValues(r) {
   document.getElementById("fName").value = r.name;
+  document.getElementById("fCategory").value = r.category || "";
   document.getElementById("fIngredients").value = r.ingredients;
   document.getElementById("fSteps").value = r.steps;
   document.getElementById("fTags").value = r.tags.join(", ");
@@ -675,6 +728,7 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   }
   const data = {
     name,
+    category: document.getElementById("fCategory").value,
     photo: currentPhoto,
     ingredients: document.getElementById("fIngredients").value.trim(),
     steps: document.getElementById("fSteps").value.trim(),
@@ -1508,6 +1562,7 @@ function openDetail(id) {
   }
   document.getElementById("detailName").textContent = r.name;
   document.getElementById("detailTags").innerHTML =
+    (r.category ? `<span class="tagChip catChip">${escapeHtml(r.category)}</span>` : "") +
     r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
   document.getElementById("detailIngredients").textContent = r.ingredients || "（未記入）";
   renderNutrition(r.ingredients);
