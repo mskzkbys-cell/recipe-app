@@ -35,7 +35,7 @@
     z-index: 10;
   }
   header h1 { font-size: 1.2rem; }
-  #addBtn {
+  #addBtn, #profileBtn {
     background: white;
     color: #e8734a;
     border: none;
@@ -45,6 +45,7 @@
     font-weight: bold;
     cursor: pointer;
   }
+  #profileBtn { padding: 8px 12px; }
 
   /* ===== 検索・絞り込み ===== */
   .toolbar {
@@ -211,7 +212,7 @@
     margin-bottom: 4px;
     color: #666;
   }
-  .field input[type="text"], .field input[type="url"], .field textarea, .field select {
+  .field input[type="text"], .field input[type="url"], .field input[type="number"], .field textarea, .field select {
     width: 100%;
     padding: 8px 10px;
     border: 1px solid #ddd;
@@ -346,7 +347,10 @@
 
 <header>
   <h1>🍳 マイレシピ帳</h1>
-  <button id="addBtn">＋ 追加</button>
+  <div style="display:flex; gap:8px;">
+    <button id="profileBtn" title="マイデータ">👤</button>
+    <button id="addBtn">＋ 追加</button>
+  </div>
 </header>
 
 <div class="toolbar">
@@ -411,6 +415,54 @@
     <div class="btnRow">
       <button class="btn btnPrimary" id="saveBtn">保存</button>
       <button class="btn btnGray" id="cancelBtn">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== マイデータモーダル（身体情報から1日の目安カロリー・PFCを計算） ===== -->
+<div class="modal" id="profileModal">
+  <div class="modalBox">
+    <h2>👤 マイデータ</h2>
+    <div class="field">
+      <label>性別</label>
+      <select id="pSex">
+        <option value="female">女性</option>
+        <option value="male">男性</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>年齢</label>
+      <input type="number" id="pAge" min="10" max="100" placeholder="例：40">
+    </div>
+    <div class="field">
+      <label>身長（cm）</label>
+      <input type="number" id="pHeight" min="100" max="220" placeholder="例：165">
+    </div>
+    <div class="field">
+      <label>体重（kg）</label>
+      <input type="number" id="pWeight" min="25" max="200" placeholder="例：60">
+    </div>
+    <div class="field">
+      <label>活動量</label>
+      <select id="pActivity">
+        <option value="1.2">低い（デスクワーク中心・運動ほぼなし）</option>
+        <option value="1.375">ふつう（立ち仕事や軽い運動あり）</option>
+        <option value="1.55">高い（週数回の運動習慣あり）</option>
+        <option value="1.725">かなり高い（激しい運動・力仕事）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>目標</label>
+      <select id="pGoal">
+        <option value="keep">今の体型を維持</option>
+        <option value="lose">減量したい</option>
+        <option value="gain">増量したい</option>
+      </select>
+    </div>
+    <div id="profileResult"></div>
+    <div class="btnRow">
+      <button class="btn btnPrimary" id="profileSaveBtn">保存</button>
+      <button class="btn btnGray" id="profileCloseBtn">閉じる</button>
     </div>
   </div>
 </div>
@@ -1274,6 +1326,113 @@ document.getElementById("ocrFile").addEventListener("change", (e) => {
 });
 
 // ============================================================
+// マイデータ（身体情報から1日に必要なカロリーとPFCを計算）
+// 計算方法：Mifflin-St Jeor式で基礎代謝 → 活動量を掛けて1日の消費量
+// → 目標（減量/維持/増量）で調整 → 目標に応じたPFC比率でグラム数に換算
+// ============================================================
+const PROFILE_KEY = "myProfile";
+const profileModal = document.getElementById("profileModal");
+
+function loadProfile() {
+  const json = localStorage.getItem(PROFILE_KEY);
+  return json ? JSON.parse(json) : null;
+}
+
+function calcDailyTarget(p) {
+  // 基礎代謝（Mifflin-St Jeor式）
+  const bmr = 10 * p.weight + 6.25 * p.height - 5 * p.age + (p.sex === "male" ? 5 : -161);
+  let kcal = bmr * p.activity;
+  let ratio; // たんぱく質・脂質・炭水化物のカロリー比率
+  if (p.goal === "lose") {
+    kcal -= 400;                  // ゆるやかな減量ペース（月1〜1.5kg程度）
+    ratio = [0.20, 0.25, 0.55];   // 減量中は筋肉を守るためたんぱく質多め
+  } else if (p.goal === "gain") {
+    kcal += 300;
+    ratio = [0.15, 0.25, 0.60];
+  } else {
+    ratio = [0.15, 0.25, 0.60];   // 日本の食事摂取基準の目標範囲の中間あたり
+  }
+  kcal = Math.max(kcal, 1200); // 極端に減らしすぎない安全ライン
+  return {
+    kcal: Math.round(kcal / 10) * 10,
+    p: Math.round(kcal * ratio[0] / 4), // たんぱく質 1g = 4kcal
+    f: Math.round(kcal * ratio[1] / 9), // 脂質 1g = 9kcal
+    c: Math.round(kcal * ratio[2] / 4), // 炭水化物 1g = 4kcal
+    pct: ratio.map(r => Math.round(r * 100)),
+  };
+}
+
+// フォームの入力値を読み取る（未入力があれば null）
+function readProfileForm() {
+  const p = {
+    sex: document.getElementById("pSex").value,
+    age: parseFloat(document.getElementById("pAge").value),
+    height: parseFloat(document.getElementById("pHeight").value),
+    weight: parseFloat(document.getElementById("pWeight").value),
+    activity: parseFloat(document.getElementById("pActivity").value),
+    goal: document.getElementById("pGoal").value,
+  };
+  return (p.age && p.height && p.weight) ? p : null;
+}
+
+// 入力に応じて1日の目安をその場で表示する
+function renderProfileResult() {
+  const el = document.getElementById("profileResult");
+  const p = readProfileForm();
+  if (!p) {
+    el.innerHTML = '<p style="color:#999;font-size:0.85rem;margin-bottom:8px;">年齢・身長・体重を入力すると、1日の目安がここに表示されます</p>';
+    return;
+  }
+  const t = calcDailyTarget(p);
+  el.innerHTML = `
+    <div class="nutKcal">1日の目安：約 ${t.kcal} kcal</div>
+    <div class="pfcBar">
+      <div class="p" style="width:${t.pct[0]}%"></div>
+      <div class="f" style="width:${t.pct[1]}%"></div>
+      <div class="c" style="width:${t.pct[2]}%"></div>
+    </div>
+    <div class="pfcLegend">
+      <span><span class="dot" style="background:#5b9bd5"></span>たんぱく質 ${t.p}g（${t.pct[0]}%）</span>
+      <span><span class="dot" style="background:#f2b04c"></span>脂質 ${t.f}g（${t.pct[1]}%）</span>
+      <span><span class="dot" style="background:#e8734a"></span>炭水化物 ${t.c}g（${t.pct[2]}%）</span>
+    </div>
+    <div class="nutNote">※一般的な計算式（Mifflin-St Jeor式）による概算です。持病のある方や本格的な体調管理は、医師や管理栄養士に相談してください。</div>`;
+}
+
+document.getElementById("profileBtn").addEventListener("click", () => {
+  const saved = loadProfile();
+  if (saved) {
+    document.getElementById("pSex").value = saved.sex;
+    document.getElementById("pAge").value = saved.age;
+    document.getElementById("pHeight").value = saved.height;
+    document.getElementById("pWeight").value = saved.weight;
+    document.getElementById("pActivity").value = saved.activity;
+    document.getElementById("pGoal").value = saved.goal;
+  }
+  renderProfileResult();
+  profileModal.classList.add("open");
+});
+
+// 入力を変えるたびに結果を更新する
+for (const id of ["pSex", "pAge", "pHeight", "pWeight", "pActivity", "pGoal"]) {
+  document.getElementById(id).addEventListener("input", renderProfileResult);
+}
+
+document.getElementById("profileSaveBtn").addEventListener("click", () => {
+  const p = readProfileForm();
+  if (!p) {
+    alert("年齢・身長・体重を入力してください");
+    return;
+  }
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  profileModal.classList.remove("open");
+});
+
+document.getElementById("profileCloseBtn").addEventListener("click", () => {
+  profileModal.classList.remove("open");
+});
+
+// ============================================================
 // カロリー・PFCバランスの概算
 // 材料欄の文字を解析し、内蔵の食品成分データ（100gあたりの
 // kcal/たんぱく質/脂質/炭水化物）と照合して合計する。
@@ -1527,6 +1686,15 @@ function renderNutrition(ingredientsText) {
     ? `<div class="nutNote">計算に含めていない材料: ${result.skipped.map(escapeHtml).join("、")}</div>`
     : "";
 
+  // マイデータが登録されていれば、1日の目安に対する割合も表示する
+  const profile = loadProfile();
+  let targetHtml = "";
+  if (profile && t.k > 0) {
+    const daily = calcDailyTarget(profile);
+    const pct = Math.round(t.k / daily.kcal * 100);
+    targetHtml = `<div class="nutNote" style="color:#3a6ea5;">👤 あなたの1日の目安（約${daily.kcal}kcal）の約${pct}%です</div>`;
+  }
+
   el.innerHTML = `
     <div class="nutKcal">約 ${Math.round(t.k / 10) * 10} kcal
       <span style="font-size:0.75rem;color:#999;font-weight:normal;">（レシピ全体）</span>
@@ -1541,6 +1709,7 @@ function renderNutrition(ingredientsText) {
       <span><span class="dot" style="background:#f2b04c"></span>脂質 ${Math.round(t.f)}g（${fPct}%）</span>
       <span><span class="dot" style="background:#e8734a"></span>炭水化物 ${Math.round(t.c)}g（${cPct}%）</span>
     </div>
+    ${targetHtml}
     ${skippedHtml}
     <div class="nutNote">※一般的な食品成分からの概算です。分量の書き方によって誤差が出ます。</div>`;
 }
@@ -1612,7 +1781,7 @@ document.getElementById("deleteBtn").addEventListener("click", () => {
 });
 
 // モーダルの外側（暗い部分）をタップしたら閉じる
-for (const modal of [editModal, detailModal, importModal]) {
+for (const modal of [editModal, detailModal, importModal, profileModal]) {
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.classList.remove("open");
   });
