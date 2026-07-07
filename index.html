@@ -53,6 +53,83 @@
     max-width: 800px;
     margin: 0 auto;
   }
+  /* 今日の食事記録カード */
+  #todayCard {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    cursor: pointer;
+  }
+  #todayCard .tTitle { font-size: 0.78rem; color: #999; }
+  #todayCard .tMain { font-weight: bold; color: #d05a30; margin-top: 2px; }
+  .miniBar {
+    height: 8px;
+    border-radius: 4px;
+    background: #eee;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .miniBar > div { height: 100%; background: #e8734a; }
+  .miniBar > div.over { background: #c0392b; }
+
+  /* 食事記録モーダル */
+  .logNav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .logNav button {
+    background: white;
+    border: 1px solid #e8734a;
+    color: #d05a30;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .logNav button:disabled { opacity: 0.3; }
+  .logNav span { font-weight: bold; }
+  .logRow { margin-bottom: 12px; }
+  .logRow .lLabel {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+  }
+  .mealItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0e6da;
+    font-size: 0.9rem;
+  }
+  .mealItem .mTime { color: #999; font-size: 0.8rem; }
+  .mealItem .mName { flex: 1; }
+  .mealItem button {
+    background: none;
+    border: none;
+    color: #c0392b;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 2px 6px;
+  }
+
+  /* 「食べた記録」の分量ボタン */
+  .portionRow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .portionRow button {
+    background: #fdeee7;
+    border: 1px solid #e8a887;
+    color: #d05a30;
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  #mealLogStatus { font-size: 0.8rem; color: #2e7d32; margin-top: 8px; }
+
   /* トップページのクイック追加ボタン */
   .quickAdd {
     display: flex;
@@ -354,6 +431,7 @@
 </header>
 
 <div class="toolbar">
+  <div id="todayCard"></div>
   <div class="quickAdd">
     <button data-mode="url">🔗 URLから<br>取り込み</button>
     <button data-mode="paste">📋 SNS投稿文を<br>貼り付け</button>
@@ -415,6 +493,23 @@
     <div class="btnRow">
       <button class="btn btnPrimary" id="saveBtn">保存</button>
       <button class="btn btnGray" id="cancelBtn">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 食事記録モーダル（日ごとの摂取量と目安の過不足を表示） ===== -->
+<div class="modal" id="logModal">
+  <div class="modalBox">
+    <h2>🍽️ 食事の記録</h2>
+    <div class="logNav">
+      <button id="logPrev">◀ 前の日</button>
+      <span id="logDate"></span>
+      <button id="logNext">翌日 ▶</button>
+    </div>
+    <div id="logSummary"></div>
+    <div id="logMeals"></div>
+    <div class="btnRow">
+      <button class="btn btnGray" id="logCloseBtn">閉じる</button>
     </div>
   </div>
 </div>
@@ -505,6 +600,16 @@
     <div class="detailSection">
       <h3>カロリー・PFCバランスの目安</h3>
       <div id="nutritionBody"></div>
+    </div>
+    <div class="detailSection">
+      <h3>🍽️ 食べた記録（食べた量を選ぶと今日の記録に追加）</h3>
+      <div class="portionRow">
+        <button data-portion="1">全部</button>
+        <button data-portion="0.5">半分</button>
+        <button data-portion="0.3333">1/3</button>
+        <button data-portion="0.25">1/4</button>
+      </div>
+      <div id="mealLogStatus"></div>
     </div>
     <div class="detailSection">
       <h3>作り方</h3>
@@ -1426,6 +1531,7 @@ document.getElementById("profileSaveBtn").addEventListener("click", () => {
   }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
   profileModal.classList.remove("open");
+  renderTodayCard(); // 目安が変わるのでトップのカードも更新
 });
 
 document.getElementById("profileCloseBtn").addEventListener("click", () => {
@@ -1715,6 +1821,168 @@ function renderNutrition(ingredientsText) {
 }
 
 // ============================================================
+// 食事の記録
+// 食べたレシピを日付ごとに記録して、1日の目安との過不足を表示する。
+// 日付はこの端末の時計を基準に、0時〜23時59分を「1日」として集計する。
+// 栄養は記録した時点の値を保存するので、後でレシピを直しても記録は変わらない。
+// ============================================================
+const MEAL_KEY = "mealLog";
+const logModal = document.getElementById("logModal");
+let logViewDate = new Date(); // 記録モーダルで表示中の日
+
+function loadMeals() {
+  const json = localStorage.getItem(MEAL_KEY);
+  return json ? JSON.parse(json) : [];
+}
+function saveMeals(meals) {
+  localStorage.setItem(MEAL_KEY, JSON.stringify(meals));
+}
+
+// 端末の時計での「その日」を表す文字列（例：2026-07-06）
+function dateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function mealsOn(key) {
+  return loadMeals().filter(m => m.date === key);
+}
+
+function sumMeals(meals) {
+  return meals.reduce(
+    (sum, m) => ({ k: sum.k + m.k, p: sum.p + m.p, f: sum.f + m.f, c: sum.c + m.c }),
+    { k: 0, p: 0, f: 0, c: 0 }
+  );
+}
+
+// 詳細画面の「食べた記録」ボタン
+document.querySelectorAll(".portionRow button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const r = recipes.find(x => x.id === viewingId);
+    if (!r) return;
+    const portion = parseFloat(btn.dataset.portion);
+    const t = estimateNutrition(r.ingredients || "").totals;
+    const now = new Date();
+    const meals = loadMeals();
+    meals.push({
+      id: Date.now(),
+      name: r.name,
+      portionLabel: btn.textContent,
+      date: dateKey(now),
+      time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+      k: Math.round(t.k * portion),
+      p: Math.round(t.p * portion),
+      f: Math.round(t.f * portion),
+      c: Math.round(t.c * portion),
+    });
+    saveMeals(meals);
+    const todayTotal = sumMeals(mealsOn(dateKey(now)));
+    document.getElementById("mealLogStatus").textContent =
+      `✅ 記録しました！今日の合計：約 ${Math.round(todayTotal.k)} kcal`;
+    renderTodayCard();
+  });
+});
+
+// トップページの「今日の食事記録」カード
+function renderTodayCard() {
+  const el = document.getElementById("todayCard");
+  const total = sumMeals(mealsOn(dateKey(new Date())));
+  const profile = loadProfile();
+  let main, barHtml = "";
+  if (profile) {
+    const daily = calcDailyTarget(profile);
+    const over = total.k > daily.kcal;
+    const pct = Math.min(Math.round(total.k / daily.kcal * 100), 100);
+    main = `${Math.round(total.k)} / ${daily.kcal} kcal`
+      + (over ? `（${Math.round(total.k - daily.kcal)}kcalオーバー）` : "");
+    barHtml = `<div class="miniBar"><div class="${over ? "over" : ""}" style="width:${pct}%"></div></div>`;
+  } else {
+    main = `${Math.round(total.k)} kcal（👤マイデータを登録すると目安と比べられます）`;
+  }
+  el.innerHTML = `<div class="tTitle">🍽️ 今日の食事記録（タップで詳細）</div><div class="tMain">${main}</div>${barHtml}`;
+}
+
+document.getElementById("todayCard").addEventListener("click", () => {
+  logViewDate = new Date();
+  renderLogModal();
+  logModal.classList.add("open");
+});
+
+// 記録モーダルの中身を描く
+function renderLogModal() {
+  const key = dateKey(logViewDate);
+  const isToday = key === dateKey(new Date());
+  const youbi = "日月火水木金土"[logViewDate.getDay()];
+  document.getElementById("logDate").textContent =
+    `${logViewDate.getMonth() + 1}月${logViewDate.getDate()}日（${isToday ? "今日" : youbi}）`;
+  document.getElementById("logNext").disabled = isToday;
+
+  const meals = mealsOn(key);
+  const total = sumMeals(meals);
+  const profile = loadProfile();
+  const summary = document.getElementById("logSummary");
+
+  if (profile) {
+    const daily = calcDailyTarget(profile);
+    // 摂取量と目安を1行＋バーで表す
+    const row = (label, value, target, unit, color) => {
+      const over = value > target;
+      const pct = Math.min(value / target * 100, 100);
+      const note = over
+        ? `${Math.round(value - target)}${unit}オーバー`
+        : `あと${Math.round(target - value)}${unit}`;
+      return `<div class="logRow">
+        <div class="lLabel"><span>${label}</span>
+          <span style="${over ? "color:#c0392b;font-weight:bold;" : ""}">${Math.round(value)} / ${target}${unit}（${note}）</span>
+        </div>
+        <div class="miniBar"><div style="width:${pct}%;background:${over ? "#c0392b" : color}"></div></div>
+      </div>`;
+    };
+    summary.innerHTML =
+      row("カロリー", total.k, daily.kcal, "kcal", "#e8734a") +
+      row("たんぱく質", total.p, daily.p, "g", "#5b9bd5") +
+      row("脂質", total.f, daily.f, "g", "#f2b04c") +
+      row("炭水化物", total.c, daily.c, "g", "#d05a30");
+  } else {
+    summary.innerHTML = `<div class="nutNote">合計：約 ${Math.round(total.k)} kcal（たんぱく質${Math.round(total.p)}g・脂質${Math.round(total.f)}g・炭水化物${Math.round(total.c)}g）<br>👤マイデータを登録すると、目安との過不足が表示されます</div>`;
+  }
+
+  // 食べたものリスト
+  const list = document.getElementById("logMeals");
+  if (meals.length === 0) {
+    list.innerHTML = '<p style="color:#999;font-size:0.85rem;margin-top:10px;">この日の記録はありません。レシピの詳細画面の「🍽️ 食べた記録」から登録できます。</p>';
+  } else {
+    list.innerHTML = meals.map(m =>
+      `<div class="mealItem">
+        <span class="mTime">${m.time}</span>
+        <span class="mName">${escapeHtml(m.name)}（${escapeHtml(m.portionLabel)}）</span>
+        <span>約${m.k}kcal</span>
+        <button data-meal-id="${m.id}" title="この記録を削除">✕</button>
+      </div>`
+    ).join("");
+    list.querySelectorAll("button[data-meal-id]").forEach(b => {
+      b.addEventListener("click", () => {
+        if (!confirm("この記録を削除しますか？")) return;
+        saveMeals(loadMeals().filter(m => m.id !== Number(b.dataset.mealId)));
+        renderLogModal();
+        renderTodayCard();
+      });
+    });
+  }
+}
+
+document.getElementById("logPrev").addEventListener("click", () => {
+  logViewDate.setDate(logViewDate.getDate() - 1);
+  renderLogModal();
+});
+document.getElementById("logNext").addEventListener("click", () => {
+  logViewDate.setDate(logViewDate.getDate() + 1);
+  renderLogModal();
+});
+document.getElementById("logCloseBtn").addEventListener("click", () => {
+  logModal.classList.remove("open");
+});
+
+// ============================================================
 // 詳細表示
 // ============================================================
 function openDetail(id) {
@@ -1735,6 +2003,7 @@ function openDetail(id) {
     r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
   document.getElementById("detailIngredients").textContent = r.ingredients || "（未記入）";
   renderNutrition(r.ingredients);
+  document.getElementById("mealLogStatus").textContent = "";
   document.getElementById("detailSteps").textContent = r.steps || "（未記入）";
 
   const urlSection = document.getElementById("detailUrlSection");
@@ -1781,7 +2050,7 @@ document.getElementById("deleteBtn").addEventListener("click", () => {
 });
 
 // モーダルの外側（暗い部分）をタップしたら閉じる
-for (const modal of [editModal, detailModal, importModal, profileModal]) {
+for (const modal of [editModal, detailModal, importModal, profileModal, logModal]) {
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.classList.remove("open");
   });
@@ -1789,6 +2058,7 @@ for (const modal of [editModal, detailModal, importModal, profileModal]) {
 
 // 最初の表示
 renderList();
+renderTodayCard();
 
 // オフライン対応：Service Workerを登録する（対応していない環境では何もしない）
 if ("serviceWorker" in navigator) {
