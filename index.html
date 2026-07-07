@@ -1088,8 +1088,92 @@ async function getOcrWorker() {
         }
       },
     });
+    // 解像度の想定値を伝えると文字サイズの判定が安定する
+    await ocrWorker.setParameters({ user_defined_dpi: "300" });
   }
   return ocrWorker;
+}
+
+// 画像を読み込んで描画できる形にする（スマホ写真の向き情報も反映）
+function loadImageForOcr(source) {
+  if (source instanceof HTMLCanvasElement) return Promise.resolve(source);
+  if (window.createImageBitmap) {
+    return createImageBitmap(source, { imageOrientation: "from-image" })
+      .catch(() => createImageBitmap(source));
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(source);
+  });
+}
+
+// 写真をOCRが読みやすい形に自動加工する：
+// 1) 文字認識に適した大きさへ拡大縮小
+// 2) 白黒化し、「周辺との明るさの差」で文字を判定する局所二値化（Bradley法）
+//    → 全体を一律に白黒分けする方式と違い、影や照明ムラのある写真に強い
+async function preprocessForOcr(source) {
+  const img = await loadImageForOcr(source);
+  const TARGET = 1800; // 長い辺の目安ピクセル数
+  const scale = Math.min(Math.max(TARGET / Math.max(img.width, img.height), 0.2), 3);
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const px = imageData.data;
+
+  // 各画素の明るさ（白黒値）を求める
+  const gray = new Uint8ClampedArray(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114;
+  }
+
+  // 積分画像：周辺の明るさの合計を一瞬で求めるための下ごしらえ
+  const integral = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < w; x++) {
+      rowSum += gray[y * w + x];
+      integral[(y + 1) * (w + 1) + (x + 1)] = integral[y * (w + 1) + (x + 1)] + rowSum;
+    }
+  }
+
+  // 局所二値化：「周辺の平均より12%以上暗い」画素を文字（黒）とみなす
+  const half = Math.floor(Math.max(16, Math.max(w, h) / 16) / 2);
+  let blackCount = 0;
+  for (let y = 0; y < h; y++) {
+    const y1 = Math.max(0, y - half), y2 = Math.min(h - 1, y + half);
+    for (let x = 0; x < w; x++) {
+      const x1 = Math.max(0, x - half), x2 = Math.min(w - 1, x + half);
+      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum = integral[(y2 + 1) * (w + 1) + (x2 + 1)] - integral[y1 * (w + 1) + (x2 + 1)]
+                - integral[(y2 + 1) * (w + 1) + x1] + integral[y1 * (w + 1) + x1];
+      const isBlack = gray[y * w + x] * area <= sum * 0.88;
+      if (isBlack) blackCount++;
+      const v = isBlack ? 0 : 255;
+      const i4 = (y * w + x) * 4;
+      px[i4] = px[i4 + 1] = px[i4 + 2] = v;
+      px[i4 + 3] = 255;
+    }
+  }
+
+  // 黒が半分以上＝「暗い背景に明るい文字」の写真なので、白黒を反転する
+  if (blackCount > w * h * 0.5) {
+    for (let i = 0; i < px.length; i += 4) {
+      const v = 255 - px[i];
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 // 画像（ファイルやcanvas）から文字を読み取って貼り付け欄に入れる
@@ -1100,7 +1184,14 @@ async function runOcr(imageSource) {
     setImportStatus("読み取りの準備中…（初回は部品のダウンロードで1分ほどかかることがあります）");
     ocrProgressHandler = (pct) => setImportStatus(`文字を読み取り中… ${pct}%`);
     const worker = await getOcrWorker();
-    const { data } = await worker.recognize(imageSource);
+    setImportStatus("写真を読み取りやすく加工中…");
+    let target = imageSource;
+    try {
+      target = await preprocessForOcr(imageSource);
+    } catch (err) {
+      // 加工に失敗した場合は元の写真のまま読み取る
+    }
+    const { data } = await worker.recognize(target);
     // 日本語OCRは文字の間に余計なスペースが入りやすいので取り除く
     const cleaned = data.text
       .replace(/(?<=[　-ヿ一-鿿])[ \t]+(?=[　-ヿ一-鿿])/g, "")
