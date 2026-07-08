@@ -117,6 +117,42 @@
     padding: 2px 6px;
   }
 
+  /* 市販品リスト */
+  .foodItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0e6da;
+    font-size: 0.9rem;
+  }
+  .foodItem .fName { flex: 1; }
+  .foodItem .logBtn {
+    background: #e8734a;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .foodItem .delBtn {
+    background: none;
+    border: none;
+    color: #c0392b;
+    cursor: pointer;
+    padding: 2px 6px;
+  }
+  #foodModal .importBox input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+  }
+  .nfGrid { display: flex; gap: 6px; margin-top: 6px; }
+
   /* 「食べた記録」の分量ボタン */
   .portionRow { display: flex; gap: 8px; flex-wrap: wrap; }
   .portionRow button {
@@ -509,7 +545,31 @@
     <div id="logSummary"></div>
     <div id="logMeals"></div>
     <div class="btnRow">
+      <button class="btn btnPrimary" id="addFoodBtn">🛒 市販品を記録</button>
       <button class="btn btnGray" id="logCloseBtn">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 市販品モーダル（コンビニおにぎり等、レシピ以外の食べ物を記録） ===== -->
+<div class="modal" id="foodModal">
+  <div class="modalBox">
+    <h2>🛒 市販品を記録</h2>
+    <p class="nutNote" style="margin-bottom:6px;">「記録」を押すと表示中の日に追加されます。数値は1食分の目安なので、パッケージの栄養成分表示に合わせて自分の品を登録するとより正確です。</p>
+    <div id="foodList"></div>
+    <div class="importBox" style="margin-top:14px;">
+      <label>新しい市販品を登録（1食分あたり）</label>
+      <input type="text" id="nfName" placeholder="名前（例：おにぎり 昆布）">
+      <div class="nfGrid">
+        <input type="number" id="nfK" placeholder="kcal *">
+        <input type="number" id="nfP" placeholder="P(g)">
+        <input type="number" id="nfF" placeholder="F(g)">
+        <input type="number" id="nfC" placeholder="C(g)">
+      </div>
+      <button class="btn btnPrimary" id="nfAddBtn" style="margin-top:8px;">登録</button>
+    </div>
+    <div class="btnRow">
+      <button class="btn btnGray" id="foodCloseBtn">閉じる</button>
     </div>
   </div>
 </div>
@@ -1970,6 +2030,105 @@ function renderLogModal() {
   }
 }
 
+// ---- 市販品（レシピ以外の食べ物）の記録 ----
+// パッケージの栄養成分表示を見て登録しておき、1タップで記録できるようにする。
+const FOOD_ITEM_KEY = "storeFood";
+
+// 最初から入れておくよくある市販品（1食分の目安。あくまで概算値）
+const DEFAULT_STORE_FOODS = [
+  { name: "おにぎり（鮭・昆布など）", k: 180, p: 4, f: 1, c: 39 },
+  { name: "サラダチキン", k: 110, p: 24, f: 1, c: 1 },
+  { name: "カップ麺（レギュラー）", k: 350, p: 9, f: 15, c: 45 },
+  { name: "菓子パン（あんぱん等）", k: 280, p: 7, f: 6, c: 50 },
+  { name: "食パン 6枚切り1枚", k: 155, p: 5, f: 3, c: 28 },
+  { name: "バナナ 1本", k: 85, p: 1, f: 0, c: 22 },
+  { name: "ゆで卵 1個", k: 75, p: 6, f: 5, c: 0 },
+  { name: "納豆 1パック", k: 90, p: 8, f: 5, c: 6 },
+  { name: "カフェラテ", k: 100, p: 6, f: 6, c: 9 },
+  { name: "ヨーグルト（無糖）", k: 60, p: 4, f: 3, c: 5 },
+];
+const foodModal = document.getElementById("foodModal");
+
+function loadStoreFoods() {
+  const json = localStorage.getItem(FOOD_ITEM_KEY);
+  return json ? JSON.parse(json) : DEFAULT_STORE_FOODS.map((f, i) => ({ id: i + 1, ...f }));
+}
+function saveStoreFoods(foods) {
+  localStorage.setItem(FOOD_ITEM_KEY, JSON.stringify(foods));
+}
+
+// 市販品を、記録モーダルで表示中の日に記録する
+function logStoreFood(food) {
+  const now = new Date();
+  const isToday = dateKey(logViewDate) === dateKey(now);
+  const meals = loadMeals();
+  meals.push({
+    id: Date.now(),
+    name: food.name,
+    portionLabel: "市販品",
+    date: dateKey(logViewDate), // 表示中の日付に記録（過去日への記録し忘れも入れられる）
+    time: isToday ? `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}` : "--:--",
+    k: Math.round(food.k), p: Math.round(food.p), f: Math.round(food.f), c: Math.round(food.c),
+  });
+  saveMeals(meals);
+  renderLogModal();
+  renderTodayCard();
+}
+
+function renderFoodList() {
+  const list = document.getElementById("foodList");
+  const foods = loadStoreFoods();
+  list.innerHTML = foods.map(f =>
+    `<div class="foodItem">
+      <span class="fName">${escapeHtml(f.name)}<br><span class="mTime">約${f.k}kcal（P${f.p}・F${f.f}・C${f.c}）</span></span>
+      <button class="logBtn" data-food-id="${f.id}">記録</button>
+      <button class="delBtn" data-del-id="${f.id}" title="このリストから削除">✕</button>
+    </div>`
+  ).join("");
+  list.querySelectorAll(".logBtn").forEach(b => b.addEventListener("click", () => {
+    const food = loadStoreFoods().find(f => f.id === Number(b.dataset.foodId));
+    if (food) {
+      logStoreFood(food);
+      foodModal.classList.remove("open"); // 記録したら記録画面に戻る
+    }
+  }));
+  list.querySelectorAll(".delBtn").forEach(b => b.addEventListener("click", () => {
+    if (!confirm("この市販品をリストから削除しますか？（過去の記録は消えません）")) return;
+    saveStoreFoods(loadStoreFoods().filter(f => f.id !== Number(b.dataset.delId)));
+    renderFoodList();
+  }));
+}
+
+document.getElementById("addFoodBtn").addEventListener("click", () => {
+  renderFoodList();
+  foodModal.classList.add("open");
+});
+document.getElementById("foodCloseBtn").addEventListener("click", () => {
+  foodModal.classList.remove("open");
+});
+
+document.getElementById("nfAddBtn").addEventListener("click", () => {
+  const name = document.getElementById("nfName").value.trim();
+  const k = parseFloat(document.getElementById("nfK").value);
+  if (!name || !k) {
+    alert("名前とkcalは必ず入力してください");
+    return;
+  }
+  const foods = loadStoreFoods();
+  foods.push({
+    id: Date.now(),
+    name,
+    k,
+    p: parseFloat(document.getElementById("nfP").value) || 0,
+    f: parseFloat(document.getElementById("nfF").value) || 0,
+    c: parseFloat(document.getElementById("nfC").value) || 0,
+  });
+  saveStoreFoods(foods);
+  // 入力欄をクリア
+  for (const id of ["nfName", "nfK", "nfP", "nfF", "nfC"]) document.getElementById(id).value = "";
+  renderFoodList();
+});
+
 document.getElementById("logPrev").addEventListener("click", () => {
   logViewDate.setDate(logViewDate.getDate() - 1);
   renderLogModal();
@@ -2050,7 +2209,7 @@ document.getElementById("deleteBtn").addEventListener("click", () => {
 });
 
 // モーダルの外側（暗い部分）をタップしたら閉じる
-for (const modal of [editModal, detailModal, importModal, profileModal, logModal]) {
+for (const modal of [editModal, detailModal, importModal, profileModal, logModal, foodModal]) {
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.classList.remove("open");
   });
