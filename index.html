@@ -1653,6 +1653,8 @@ document.getElementById("profileSaveBtn").addEventListener("click", () => {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
   profileModal.classList.remove("open");
   renderTodayCard(); // 目安が変わるのでトップのカードも更新
+  // 食事の記録画面が開いたままなら、その数値も更新する
+  if (logModal.classList.contains("open")) renderLogModal();
 });
 
 document.getElementById("profileCloseBtn").addEventListener("click", () => {
@@ -2113,10 +2115,16 @@ function renderLogModal() {
       row("カロリー", total.k, daily.kcal, "kcal", "#e8734a") +
       row("たんぱく質", total.p, daily.p, "g", "#5b9bd5") +
       row("脂質", total.f, daily.f, "g", "#f2b04c") +
-      row("炭水化物", total.c, daily.c, "g", "#d05a30");
+      row("炭水化物", total.c, daily.c, "g", "#d05a30") +
+      `<button type="button" class="linkBtn" id="logProfileBtn" style="margin-top:0;">👤 マイデータを変更する</button>`;
   } else {
-    summary.innerHTML = `<div class="nutNote">合計：約 ${Math.round(total.k)} kcal（たんぱく質${Math.round(total.p)}g・脂質${Math.round(total.f)}g・炭水化物${Math.round(total.c)}g）<br>👤マイデータを登録すると、目安との過不足が表示されます</div>`;
+    summary.innerHTML = `<div class="nutNote">合計：約 ${Math.round(total.k)} kcal（たんぱく質${Math.round(total.p)}g・脂質${Math.round(total.f)}g・炭水化物${Math.round(total.c)}g）</div>
+      <button type="button" class="btn btnPrimary" id="logProfileBtn" style="margin:8px 0 10px;">👤 マイデータを登録して過不足を表示</button>`;
   }
+  // 記録画面からマイデータの登録・変更画面を開けるようにする
+  document.getElementById("logProfileBtn").addEventListener("click", () => {
+    document.getElementById("profileBtn").click(); // ヘッダーの👤ボタンと同じ動き
+  });
 
   // 食べたものリスト
   const list = document.getElementById("logMeals");
