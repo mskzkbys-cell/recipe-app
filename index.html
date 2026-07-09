@@ -432,6 +432,35 @@
   .detailSection p { white-space: pre-wrap; font-size: 0.95rem; }
   .detailSection a { color: #2980b9; word-break: break-all; }
 
+  /* 人数（〇人前）の増減 */
+  .servingsRow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .servingsRow button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid #e8734a;
+    background: white;
+    color: #e8734a;
+    font-size: 1.3rem;
+    font-weight: bold;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .servingsRow button:disabled { opacity: 0.3; cursor: default; }
+  .servingsRow #servLabel {
+    font-weight: bold;
+    font-size: 1.05rem;
+    min-width: 80px;
+    text-align: center;
+    color: #3a3a3a;
+  }
+  .servNote { font-size: 0.72rem; color: #999; margin-bottom: 8px; }
+
   /* 栄養表示 */
   .nutKcal { font-size: 1.2rem; font-weight: bold; color: #d05a30; }
   .pfcBar {
@@ -505,6 +534,10 @@
       <label>写真</label>
       <input type="file" id="fPhoto" accept="image/*">
       <img id="photoPreview" alt="プレビュー">
+    </div>
+    <div class="field">
+      <label>何人前（材料の分量が何人分か）</label>
+      <input type="number" id="fServings" min="1" max="20" placeholder="例：2（未入力なら1人前として扱います）">
     </div>
     <div class="field">
       <label>材料（1行に1つ）</label>
@@ -655,6 +688,12 @@
     <div class="tags" id="detailTags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;"></div>
     <div class="detailSection">
       <h3>材料</h3>
+      <div class="servingsRow">
+        <button id="servMinus" title="人数を減らす">−</button>
+        <span id="servLabel">1人前</span>
+        <button id="servPlus" title="人数を増やす">＋</button>
+      </div>
+      <div class="servNote">人数を変えると材料とカロリーが自動で増減します（表示だけ変わり、保存内容はそのままです）</div>
       <p id="detailIngredients"></p>
     </div>
     <div class="detailSection">
@@ -888,6 +927,7 @@ document.querySelectorAll(".quickAdd button").forEach((btn) => {
 function setFormValues(r) {
   document.getElementById("fName").value = r.name;
   document.getElementById("fCategory").value = r.category || "";
+  document.getElementById("fServings").value = r.servings || "";
   document.getElementById("fIngredients").value = r.ingredients;
   document.getElementById("fSteps").value = r.steps;
   document.getElementById("fTags").value = r.tags.join(", ");
@@ -946,6 +986,7 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   const data = {
     name,
     category: document.getElementById("fCategory").value,
+    servings: parseInt(document.getElementById("fServings").value) || null,
     photo: currentPhoto,
     ingredients: document.getElementById("fIngredients").value.trim(),
     steps: document.getElementById("fSteps").value.trim(),
@@ -1063,6 +1104,19 @@ function collectSteps(ins, out = []) {
   return out;
 }
 
+// 「何人前」を表す値から人数（整数）を取り出す。
+// レシピサイトの recipeYield は "2人分" "4 servings" "4" 配列など様々な形がある。
+function parseServings(value) {
+  if (value == null) return null;
+  if (Array.isArray(value)) {
+    for (const v of value) { const n = parseServings(v); if (n) return n; }
+    return null;
+  }
+  const m = String(value).match(/\d+/);
+  const n = m ? parseInt(m[0]) : null;
+  return (n && n >= 1 && n <= 50) ? n : null; // 極端な値は無視
+}
+
 // カテゴリとキーワードからタグ候補を作る（多すぎないよう5個まで）
 function collectTags(recipe) {
   const tags = [];
@@ -1132,6 +1186,7 @@ document.getElementById("importBtn").addEventListener("click", async () => {
     document.getElementById("fSteps").value =
       steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
     document.getElementById("fTags").value = collectTags(recipe).join(", ");
+    document.getElementById("fServings").value = parseServings(recipe.recipeYield) || "";
     document.getElementById("fUrl").value = url;
 
     // 写真も取り込む（失敗しても本文は残す）
@@ -1297,11 +1352,16 @@ function parseRecipeText(text) {
     }
   }
 
+  // 「2人分」「4人前」などの表記から人数を拾う
+  const servMatch = text.match(/(\d+)\s*人\s*(分|前)/);
+  const servings = servMatch ? parseInt(servMatch[1]) : null;
+
   return {
     name,
     ingredients: ingredients.join("\n"),
     steps: steps.join("\n"),
     tags: uniqueTags,
+    servings,
   };
 }
 
@@ -1318,6 +1378,7 @@ document.getElementById("parseTextBtn").addEventListener("click", () => {
   if (parsed.ingredients) document.getElementById("fIngredients").value = parsed.ingredients;
   if (parsed.steps) document.getElementById("fSteps").value = parsed.steps;
   if (parsed.tags.length) document.getElementById("fTags").value = parsed.tags.join(", ");
+  if (parsed.servings) document.getElementById("fServings").value = parsed.servings;
 
   if (!parsed.ingredients && !parsed.steps) {
     // 見出しが見つからない場合は、全文をメモに残して手直ししてもらう
@@ -1599,6 +1660,51 @@ document.getElementById("profileCloseBtn").addEventListener("click", () => {
 });
 
 // ============================================================
+// 人数に合わせた材料の分量スケーリング
+// 材料欄の中の「数字＋単位」や「大さじ◯」を、人数の比率に応じて増減する。
+// 「(2倍濃縮)」のような括弧内の数字は分量ではないので変更しない。
+// ============================================================
+// スケール対象にする単位（分量を表す単位）
+const SCALE_UNIT = "g|kg|mg|ml|cc|l|ℓ|個|本|枚|束|丁|玉|片|株|缶|袋|尾|かけ|切れ|節|把|パック|杯|合|皿|cm|mm|粒";
+
+// 分量の数値をきれいに整える（小さい値は小数第2位、それ以外は第1位まで）
+function fmtQty(n) {
+  const r = n < 1 ? Math.round(n * 100) / 100 : Math.round(n * 10) / 10;
+  return String(r);
+}
+
+// 「1/2」「1.5」「3」などの分量文字列を数値にする
+function qtyToNumber(s) {
+  if (s.includes("/")) { const [a, b] = s.split("/"); return Number(a) / Number(b); }
+  return parseFloat(s);
+}
+
+// 材料1行の分量を ratio 倍にする
+function scaleLine(line, ratio) {
+  if (ratio === 1) return line;
+  // 括弧内（(2倍濃縮) など）はスケールしないよう一時的に退避
+  const masks = [];
+  const MASK = (i) => `⟦${i}⟧`; // 本文に出ない記号で退避
+  let s = line.replace(/[（(][^（()）]*[)）]/g, (m) => {
+    masks.push(m);
+    return MASK(masks.length - 1);
+  });
+  const NUM = "(\\d+(?:\\.\\d+)?|\\d+/\\d+)";
+  // 大さじ・小さじ・カップ ＋ 数字
+  s = s.replace(new RegExp("(大さじ|小さじ|カップ)(\\s*)" + NUM, "g"),
+    (_, unit, sp, n) => unit + sp + fmtQty(qtyToNumber(n) * ratio));
+  // 数字 ＋ 単位
+  s = s.replace(new RegExp(NUM + "(\\s*)(" + SCALE_UNIT + ")", "g"),
+    (_, n, sp, unit) => fmtQty(qtyToNumber(n) * ratio) + sp + unit);
+  // 退避した括弧を元に戻す
+  return s.replace(/⟦(\d+)⟧/g, (_, i) => masks[Number(i)]);
+}
+
+function scaleIngredients(text, ratio) {
+  return text.split("\n").map((l) => scaleLine(l, ratio)).join("\n");
+}
+
+// ============================================================
 // カロリー・PFCバランスの概算
 // 材料欄の文字を解析し、内蔵の食品成分データ（100gあたりの
 // kcal/たんぱく質/脂質/炭水化物）と照合して合計する。
@@ -1831,7 +1937,7 @@ function estimateNutrition(ingredientsText) {
 }
 
 // 詳細画面に栄養の概算を表示する
-function renderNutrition(ingredientsText) {
+function renderNutrition(ingredientsText, ratio = 1, servingsLabel = null) {
   const el = document.getElementById("nutritionBody");
   const result = estimateNutrition(ingredientsText || "");
 
@@ -1840,7 +1946,10 @@ function renderNutrition(ingredientsText) {
     return;
   }
 
-  const t = result.totals;
+  // 表示中の人数に合わせて栄養値をスケールする
+  const base = result.totals;
+  const t = { k: base.k * ratio, p: base.p * ratio, f: base.f * ratio, c: base.c * ratio };
+  const amountLabel = servingsLabel ? `${servingsLabel}人前ぶん` : "レシピ全体";
   // PFCの割合はカロリー換算で出す（たんぱく質・炭水化物は1gあたり4kcal、脂質は9kcal）
   const pCal = t.p * 4, fCal = t.f * 9, cCal = t.c * 4;
   const sum = (pCal + fCal + cCal) || 1;
@@ -1863,7 +1972,7 @@ function renderNutrition(ingredientsText) {
 
   el.innerHTML = `
     <div class="nutKcal">約 ${Math.round(t.k / 10) * 10} kcal
-      <span style="font-size:0.75rem;color:#999;font-weight:normal;">（レシピ全体）</span>
+      <span style="font-size:0.75rem;color:#999;font-weight:normal;">（${amountLabel}）</span>
     </div>
     <div class="pfcBar">
       <div class="p" style="width:${pPct}%"></div>
@@ -1920,7 +2029,10 @@ document.querySelectorAll(".portionRow button").forEach((btn) => {
     const r = recipes.find(x => x.id === viewingId);
     if (!r) return;
     const portion = parseFloat(btn.dataset.portion);
-    const t = estimateNutrition(r.ingredients || "").totals;
+    // 表示中の人数ぶんを基準に「全部／半分…」を計算する
+    const scale = currentRatio() * portion;
+    const base = estimateNutrition(r.ingredients || "").totals;
+    const t = { k: base.k * scale, p: base.p * scale, f: base.f * scale, c: base.c * scale };
     const now = new Date();
     const meals = loadMeals();
     meals.push({
@@ -1929,10 +2041,10 @@ document.querySelectorAll(".portionRow button").forEach((btn) => {
       portionLabel: btn.textContent,
       date: dateKey(now),
       time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
-      k: Math.round(t.k * portion),
-      p: Math.round(t.p * portion),
-      f: Math.round(t.f * portion),
-      c: Math.round(t.c * portion),
+      k: Math.round(t.k),
+      p: Math.round(t.p),
+      f: Math.round(t.f),
+      c: Math.round(t.c),
     });
     saveMeals(meals);
     const todayTotal = sumMeals(mealsOn(dateKey(now)));
@@ -2144,6 +2256,34 @@ document.getElementById("logCloseBtn").addEventListener("click", () => {
 // ============================================================
 // 詳細表示
 // ============================================================
+// 詳細画面で表示中の人数（baseは保存された何人前、viewは今表示している人数）
+let detailBaseServings = 1;
+let detailViewServings = 1;
+
+// 表示人数 ÷ 基準人数 ＝ 材料や栄養を何倍にするか
+function currentRatio() {
+  return detailViewServings / detailBaseServings;
+}
+
+// 詳細画面の材料・栄養・人数ラベルを、現在の表示人数に合わせて描き直す
+function renderDetailServings() {
+  const r = recipes.find(x => x.id === viewingId);
+  if (!r) return;
+  const ratio = currentRatio();
+  document.getElementById("servLabel").textContent = `${detailViewServings}人前`;
+  document.getElementById("servMinus").disabled = detailViewServings <= 1;
+  document.getElementById("detailIngredients").textContent =
+    r.ingredients ? scaleIngredients(r.ingredients, ratio) : "（未記入）";
+  renderNutrition(r.ingredients, ratio, detailViewServings);
+}
+
+document.getElementById("servMinus").addEventListener("click", () => {
+  if (detailViewServings > 1) { detailViewServings--; renderDetailServings(); }
+});
+document.getElementById("servPlus").addEventListener("click", () => {
+  if (detailViewServings < 20) { detailViewServings++; renderDetailServings(); }
+});
+
 function openDetail(id) {
   const r = recipes.find(r => r.id === id);
   if (!r) return;
@@ -2160,8 +2300,10 @@ function openDetail(id) {
   document.getElementById("detailTags").innerHTML =
     (r.category ? `<span class="tagChip catChip">${escapeHtml(r.category)}</span>` : "") +
     r.tags.map(t => `<span class="tagChip">${escapeHtml(t)}</span>`).join("");
-  document.getElementById("detailIngredients").textContent = r.ingredients || "（未記入）";
-  renderNutrition(r.ingredients);
+  // 人数：保存された「何人前」を基準にし、表示もその人数から始める
+  detailBaseServings = (r.servings && r.servings > 0) ? r.servings : 1;
+  detailViewServings = detailBaseServings;
+  renderDetailServings();
   document.getElementById("mealLogStatus").textContent = "";
   document.getElementById("detailSteps").textContent = r.steps || "（未記入）";
 
